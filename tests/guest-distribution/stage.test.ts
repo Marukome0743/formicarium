@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
+import type { DistributionInput } from '../../scripts/guest-distribution/stage.js';
 import { stageDistribution } from '../../scripts/guest-distribution/stage.js';
 
 const hash = (bytes: Uint8Array) =>
@@ -28,6 +36,12 @@ function elf(marker: number) {
 async function inputs(t: TestContext) {
   const dir = await mkdtemp(join(tmpdir(), 'guest-stage-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
+  const existingRoot = join(dir, 'existing-root');
+  await mkdir(join(existingRoot, 'dist/legacy'), { recursive: true });
+  await writeFile(
+    join(existingRoot, 'dist/legacy/old.wasm'),
+    Buffer.from([0, 255, 17]),
+  );
   const builds: import('../../scripts/guest-distribution/stage.js').BuildInput[] =
     [];
   for (const [index, ref] of ['main', 'feature/guest'].entries()) {
@@ -65,6 +79,7 @@ async function inputs(t: TestContext) {
     dir,
     output: join(dir, 'site'),
     input: {
+      existingRoot,
       tools: {
         aube: { default: 'main', fixture: 'seed', cwd: '/work/app' },
         legacy: { label: 'legacy' },
@@ -79,7 +94,13 @@ async function inputs(t: TestContext) {
               source: { type: 'repository' },
             },
           },
-          legacy: { old: { source: { type: 'legacy' }, custom: 42 } },
+          legacy: {
+            old: {
+              source: { type: 'legacy' },
+              custom: 42,
+              wasm: 'dist/legacy/old.wasm',
+            },
+          },
         },
       },
       builds,
@@ -207,5 +228,129 @@ test('candidate supply remains outside fixed npm files/exports', async (t) => {
   );
   assert.ok(
     !JSON.stringify(packageJson.exports).includes('guest-distribution'),
+  );
+});
+
+test('standalone additions preserve retained ref assets and refuse unsafe prior supply', async (t) => {
+  await t.test(
+    'legacy-only retained asset requires root even without retained C3 refs',
+    async (context) => {
+      const { input, dir, output } = await inputs(context);
+      const legacy = { wasm: 'dist/legacy/old.wasm' };
+      const { existingRoot: _existingRoot, ...withoutRoot } = input;
+      const next: DistributionInput = {
+        ...withoutRoot,
+        manifest: { builds: { legacy: { old: legacy } } },
+        builds: [input.builds[0]],
+      };
+      await assert.rejects(
+        stageDistribution(next, output),
+        /retained|existing|asset|root/,
+      );
+      await assert.rejects(readFile(join(output, 'tools.json')), {
+        code: 'ENOENT',
+      });
+      const existingRoot = join(dir, 'legacy-root');
+      const legacyBytes = Buffer.from([0, 255, 17]);
+      await mkdir(join(existingRoot, 'dist/legacy'), { recursive: true });
+      await writeFile(join(existingRoot, legacy.wasm), legacyBytes);
+      const result = await stageDistribution({ ...next, existingRoot }, output);
+      assert.deepEqual(result.manifest.builds!.legacy.old, legacy);
+      assert.deepEqual(await readFile(join(output, legacy.wasm)), legacyBytes);
+    },
+  );
+  async function prior(context: TestContext) {
+    const fixture = await inputs(context);
+    const old = await stageDistribution(
+      { ...fixture.input, builds: [fixture.input.builds[0]] },
+      fixture.output,
+    );
+    const next: DistributionInput & { existingRoot: string } = Object.assign(
+      {},
+      fixture.input,
+      {
+        manifest: old.manifest,
+        builds: [fixture.input.builds[1]],
+        existingRoot: fixture.output,
+      },
+    );
+    return { ...fixture, old, next, candidate: join(fixture.dir, 'candidate') };
+  }
+  await t.test(
+    'retained guest, all fixtures, provenance and legacy bytes exist in candidate',
+    async (context) => {
+      const { next, output, candidate } = await prior(context);
+      const legacyBytes = Buffer.from([0, 255, 17]);
+      await mkdir(join(output, 'dist/legacy'), { recursive: true });
+      await writeFile(join(output, 'dist/legacy/old.wasm'), legacyBytes);
+      next.manifest.builds!.legacy.old.wasm = 'dist/legacy/old.wasm';
+      const { manifest } = await stageDistribution(next, candidate);
+      const retained = manifest.builds!.aube.main;
+      for (const asset of [
+        retained.guest!,
+        retained.buildInfo!,
+        ...Object.values(retained.fixtures!),
+      ]) {
+        const bytes = await readFile(join(candidate, asset.url));
+        assert.equal(hash(bytes), asset.sha256);
+        assert.deepEqual(bytes, await readFile(join(output, asset.url)));
+      }
+      assert.deepEqual(
+        await readFile(join(candidate, 'dist/legacy/old.wasm')),
+        legacyBytes,
+      );
+      assert.deepEqual(manifest.builds!.legacy, next.manifest.builds!.legacy);
+    },
+  );
+  await t.test(
+    'retained ref requires existing root and missing assets fail before output',
+    async (context) => {
+      const { next, output, candidate } = await prior(context);
+      const { existingRoot: _existingRoot, ...withoutRoot } = next;
+      await assert.rejects(
+        stageDistribution(withoutRoot, candidate),
+        /retained|existing|asset|root/,
+      );
+      await rm(join(output, next.manifest.builds!.aube.main.guest!.url));
+      await assert.rejects(
+        stageDistribution(next, candidate),
+        /retained|asset|unavailable|missing/,
+      );
+      await assert.rejects(readFile(join(candidate, 'tools.json')), {
+        code: 'ENOENT',
+      });
+    },
+  );
+  await t.test(
+    'retained digest tamper, root escape and symlink are refused',
+    async (context) => {
+      const { next, output, candidate } = await prior(context);
+      const guest = next.manifest.builds!.aube.main.guest!;
+      const original = guest.url;
+      const bytes = await readFile(join(output, original));
+      await writeFile(join(output, original), Buffer.from('tampered'));
+      await assert.rejects(
+        stageDistribution(next, candidate),
+        /digest|SHA|mismatch|retained/,
+      );
+      await writeFile(join(output, original), bytes);
+      guest.url = '../outside';
+      await assert.rejects(
+        stageDistribution(next, candidate),
+        /path|outside|relative|retained/,
+      );
+      guest.url = original;
+      await rm(join(output, original));
+      const outside = join(next.existingRoot, '..', 'outside-guest');
+      await writeFile(outside, bytes);
+      await symlink(outside, join(output, original));
+      await assert.rejects(
+        stageDistribution(next, candidate),
+        /symlink|symbolic|retained/,
+      );
+      await assert.rejects(readFile(join(candidate, 'tools.json')), {
+        code: 'ENOENT',
+      });
+    },
   );
 });

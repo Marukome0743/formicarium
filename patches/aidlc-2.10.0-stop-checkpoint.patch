@@ -1,0 +1,122 @@
+--- a/core/hooks/aidlc-continue-workflow.ts
++++ b/core/hooks/aidlc-continue-workflow.ts
+@@ -1097,6 +1097,13 @@
+   repo?: string;
+   wave?: unknown;
+   retained?: boolean;
++  constructionCheckpoint?: {
++    ready?: boolean;
++    verified?: boolean;
++    approved?: boolean;
++    human_required?: boolean;
++    command_authorized?: boolean;
++  };
+   rulesContent?: Array<{ path: string; text: string }>;
+ }
+ 
+@@ -1216,8 +1223,14 @@
+           )
+           ? rawRulesContent as Array<{ path: string; text: string }>
+           : undefined;
++      const checkpoint = "construction_checkpoint" in parsed
++        ? (parsed as { construction_checkpoint?: unknown }).construction_checkpoint
++        : undefined;
++      const constructionCheckpoint = checkpoint !== null && typeof checkpoint === "object"
++        ? checkpoint as EngineDirective["constructionCheckpoint"] : undefined;
+       return {
+         kind,
++        ...(constructionCheckpoint ? { constructionCheckpoint } : {}),
+         ...(stage.length > 0 ? { stage } : {}),
+         ...(unit.length > 0 ? { unit } : {}),
+         ...(continueToken.length > 0 ? { continueToken } : {}),
+@@ -1528,6 +1541,19 @@
+   return allowStop();
+ }
+ 
++// A verified Construction checkpoint can wait on the human while the stage
++// checkbox remains in progress. Autonomy never waives skeleton approval or
++// authorization of the verification command. Preserve execution for checkpoints
++// which still need verification or automatic approval.
++const checkpoint = directive.constructionCheckpoint;
++if (kind === "run-stage" && checkpoint && checkpoint.approved === false && (
++  checkpoint.command_authorized === false ||
++  (checkpoint.ready === true && checkpoint.verified === true && checkpoint.human_required === true)
++)) {
++  resetGuard(projectDir);
++  return allowStop();
++}
++
+ // Human-wait carve-out: the engine returns a pending directive, but the current
+ // stage is positively at [?] awaiting-approval or [R] revising — the conductor
+ // is correctly parked on the human (an approval gate or the Request-Changes
+--- a/harness/codex/hooks/aidlc-codex-adapter.ts
++++ b/harness/codex/hooks/aidlc-codex-adapter.ts
+@@ -222,7 +222,11 @@
+ // stdin and would replay the FIRST compaction's (stale) workflow context.
+ // The compact render is read-only (source=compact emits no audit row), so
+ // re-running a true duplicate is harmless while replaying a stale one is not.
+-const bypassReplay = target === "session-start" && codex.source === "compact";
++// Stop must evaluate the live checkpoint and advance the bounded no-progress
++// counter on every delivery. Replaying a block bypasses that counter forever,
++// and can keep an obsolete block alive after the human-wait state changes.
++const bypassReplay = target === "continue-workflow" ||
++  (target === "session-start" && codex.source === "compact");
+ 
+ const DEDUPE_ROOT = join(
+   tmpdir(),
+--- a/tests/integration/t121-stop-hook-enforce.test.ts
++++ b/tests/integration/t121-stop-hook-enforce.test.ts
+@@ -383,7 +383,7 @@
+ } else if (kind === "invoke-swarm") {
+   console.log(JSON.stringify({ kind, stage, units }));
+ } else {
+-  console.log(JSON.stringify({ kind, stage, ...(unit ? { unit } : {}), ...(wave ? { wave } : {}) }));
++  console.log(JSON.stringify({ kind, stage, ...(unit ? { unit } : {}), ...(wave ? { wave } : {}), ...(process.env.MOCK_CHECKPOINT ? { construction_checkpoint: JSON.parse(process.env.MOCK_CHECKPOINT) } : {}) }));
+ }
+ process.exit(0);
+ `;
+@@ -3325,3 +3325,23 @@
+     expect(statSync(lockDir).isDirectory()).toBe(true);
+   }, 25_000); // Outer fixture budget covers runHook's unchanged 20s child limit; CI took 13.16s.
+ });
++
++
++describe("construction checkpoint Stop waits", () => {
++  for (const [label, checkpoint, allows] of [
++    ["verified skeleton awaiting approval", { ready: true, verified: true, approved: false, human_required: true, command_authorized: true }, true],
++    ["verification command awaiting authorization", { ready: true, verified: false, approved: false, human_required: true, command_authorized: false }, true],
++    ["automatic ordinary unit", { ready: true, verified: true, approved: false, human_required: false, command_authorized: true }, false],
++    ["unverified unit still needs execution", { ready: true, verified: false, approved: false, human_required: true, command_authorized: true }, false],
++    ["already approved unit", { ready: true, verified: true, approved: true, human_required: true, command_authorized: true }, false],
++  ] as const) {
++    test(label, () => {
++      const proj = makeProject();
++      seedActive(proj, "code-generation");
++      const result = runHook(proj, '{"stop_hook_active":false}', "run-stage", "", "u1", "code-generation", "", false, { MOCK_CHECKPOINT: JSON.stringify(checkpoint) });
++      expect(result.rc, result.diagnostic).toBe(0);
++      if (allows) expect(result.out).toBe("");
++      else expect(JSON.parse(result.out).decision).toBe("block");
++    }, 30000);
++  }
++});
+--- a/tests/unit/t149-codex-hook-adapter.test.ts
++++ b/tests/unit/t149-codex-hook-adapter.test.ts
+@@ -1173,3 +1173,18 @@
+     expect(src).toContain("process.execPath");
+   });
+ });
++
++
++test("identical Stop deliveries re-evaluate the no-progress cap instead of replaying a block", () => {
++  const dir = scratchProject(true);
++  try {
++    const payload = withCwd(FIXTURES.stop, dir);
++    const results = Array.from({ length: 10 }, () => runAdapter(dir, "continue-workflow", payload));
++    expect(results[0].code).toBe(0);
++    expect(JSON.parse(results[0].stdout).decision).toBe("block");
++    expect(results[9].code).toBe(0);
++    expect(results[9].stdout.trim()).toBe("");
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++}, 60000);

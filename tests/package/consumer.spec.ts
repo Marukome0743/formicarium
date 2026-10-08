@@ -208,7 +208,7 @@ test('installed real loader mutation never executes unverified original URL byte
     import { runGuest } from '/runtime/guest-io.js';
     delete Atomics.waitAsync;
     self.onmessage = async ({data}) => {
-      if (self.name === 'em-pthread') { self.onmessage = null; try { await bootstrapVerifiedBrowserCore(data.descriptor); } catch(caught) {const error = caught as ExecutionError; self.postMessage({type:'mutation-child-error',error:String(error)}); } return; }
+      if (self.name === 'em-pthread') { self.onmessage = null; try { await bootstrapVerifiedBrowserCore(data.descriptor); } catch(caught) {const error = caught; self.postMessage({type:'mutation-child-error',error:String(error)}); } return; }
       const resources = createCoreResourceOwner({environment:'browser',bootstrapURL:new URL('/mutation-worker.mjs',location.href).href});
       let descriptor;
       const NativeWorker = globalThis.Worker;
@@ -229,7 +229,7 @@ test('installed real loader mutation never executes unverified original URL byte
         }});
         const result = await runGuest({createModule: adapter.createModule, core: adapter.core, guestPath:'/guest/program', entries:[{path:'/guest/program',type:'file',data:new Uint8Array(data.guest),mode:493}], args:[], env:{}, cwd:'/work', snapshotRoots:['/work']});
         self.postMessage({code:result.exitCode,text:new TextDecoder().decode(result.stdout),marker:globalThis.__unverifiedLoaderMarker ?? 0});
-      } catch (caught) { const error = caught as ExecutionError; self.postMessage({error:String(error),code:error.code}); }
+      } catch (caught) { const error = caught; self.postMessage({error:String(error),code:error.code}); }
       finally { adapter?.core.cleanup(); for (const child of children) child.terminate(); globalThis.Worker = NativeWorker; await resources.dispose(); }
     };
   `;

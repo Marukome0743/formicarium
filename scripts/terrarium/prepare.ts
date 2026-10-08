@@ -7,6 +7,15 @@ import {
   verifyInstalledPackage,
 } from './evidence.js';
 
+/** Repository provenance comes from the main session's observed revision. */
+export function validateBaselineCommit(commit: unknown): string {
+  if (typeof commit !== 'string' || !/^[a-f0-9]{40}$/.test(commit))
+    throw new Error(
+      'integration baseline commit requires an observed full SHA',
+    );
+  return commit;
+}
+
 /** Inventory-only preparation; stage/build/test commands remain main-owned. */
 export async function prepareIntegration({
   out,
@@ -14,17 +23,24 @@ export async function prepareIntegration({
   terrarium,
   packageManifest,
   tarball,
+  baselineCommit,
+  packageRoot: suppliedPackageRoot,
 }: {
   out: string;
   site: string;
   terrarium: string;
   packageManifest: string;
   tarball: string;
+  baselineCommit: string;
+  packageRoot?: string;
 }) {
-  const packageRoot = join(
-    terrarium,
-    'packages/terrarium/node_modules/@aletheia-works/formicarium',
-  );
+  const baseline = validateBaselineCommit(baselineCommit);
+  const packageRoot =
+    suppliedPackageRoot ??
+    join(
+      terrarium,
+      'packages/terrarium/node_modules/@aletheia-works/formicarium',
+    );
   const pack = await verifyInstalledPackage({
     packageRoot,
     manifestPath: packageManifest,
@@ -49,7 +65,7 @@ export async function prepareIntegration({
     candidate,
     source,
     sourceIdentity: sha256(JSON.stringify(source)),
-    baselineCommit: '60dd0dc448f3a67d226dc8a3c6b3afcf4709823d',
+    baselineCommit: baseline,
     scope: 'existing terrarium adoption; no emulator-specific consumer code',
     unverified: [
       'published RC acceptance',

@@ -33,7 +33,8 @@ test('real tarball inventory is exactly the fixed public files', () => {
     .filter((path) => !path.endsWith('/'))
     .map((path) => path.slice(8));
   assert.deepEqual(paths.sort(), [...PACKAGE_FILES].sort());
-  assert.equal(FIRST_PARTY_JS.length, 14);
+  assert.equal(FIRST_PARTY_JS.length, 21);
+  assert.equal(PACKAGE_FILES.length, 31);
 });
 test('real tarball every file matches staged manifest digest', () => {
   assert.deepEqual(
@@ -88,4 +89,22 @@ test('license/notices/types/readme are nonempty and guests stay external', () =>
       /guest\/|fixtures\/|registry|run\.mjs|service-worker/.test(path),
     ),
   );
+});
+
+test('packed README community links resolve to the upstream repository', () => {
+  const readme = read('README.md').toString('utf8');
+  for (const filename of [
+    'CONTRIBUTING.md',
+    'CODE_OF_CONDUCT.md',
+    'SECURITY.md',
+  ]) {
+    const links = [...readme.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)]
+      .map((match) => match[1])
+      .filter((target) => target?.endsWith(filename));
+    assert.deepEqual(
+      links,
+      [`https://github.com/aletheia-works/formicarium/blob/main/${filename}`],
+      `${filename} is outside the tarball and needs its upstream URL`,
+    );
+  }
 });

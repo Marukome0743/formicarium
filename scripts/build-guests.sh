@@ -3,7 +3,7 @@
 # static-musl x86-64 のゲストをコンテナ（rust:alpine）でビルドし、dist/guests/ に置く。
 #   probe     : guest/probe の probe・hello・exit3
 #   aube      : aubepkg/aube の AUBE_REF（既定 v2.6.1）
-#   pitchfork : jdx/pitchfork（公式リポジトリ）の PITCHFORK_REF（既定 v2.29.0）。ソースは変えない（FR1.1）
+#   pitchfork : jdx/pitchfork（公式リポジトリ）の PITCHFORK_REF（既定 v2.30.1）。ソースは変えない（FR1.1）
 # 取得したコミットは dist/guests/<name>.commit に記録する（FR1.2）。
 # ビルド後、dist/guests/ にあるすべてのゲストが x86-64 の static な ELF であることを確かめる。
 # runtime/registry.js の GUESTS にあるゲストは、すべて下の guests に含める
@@ -29,7 +29,7 @@ if ! [[ $aube_ref =~ ^[A-Za-z0-9._/-]+$ ]]; then
   exit 2
 fi
 pitchfork_repo=${PITCHFORK_REPO:-https://github.com/jdx/pitchfork.git}
-pitchfork_ref=${PITCHFORK_REF:-v2.29.0}
+pitchfork_ref=${PITCHFORK_REF:-v2.30.1}
 if ! [[ $pitchfork_ref =~ ^[A-Za-z0-9._/-]+$ ]]; then
   echo "error: PITCHFORK_REF に使えない文字があります: $pitchfork_ref" >&2
   exit 2

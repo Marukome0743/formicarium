@@ -21,7 +21,7 @@ for (const [route, filename] of [
   ['nested-child', 'child'],
 ]) {
   extraFiles[`/__observer/${route}.mjs`] = await readFile(
-    new URL(`./fixtures/browser-nested-${filename}.mjs`, import.meta.url),
+    new URL(`./fixtures/browser-nested-${filename}.js`, import.meta.url),
   );
 }
 let server: Awaited<ReturnType<typeof serveDirectory>>;

@@ -1,8 +1,14 @@
 import { expect, test } from '@playwright/test';
 
+const pitchforkRef = process.env.U3_PITCHFORK_REF ?? 'v2.30.0';
+if (!['v2.30.0', 'v2.30.1'].includes(pitchforkRef))
+  throw new Error('unsupported explicit U3 pitchfork ref');
+const pitchforkVersion =
+  pitchforkRef === 'v2.30.1' ? 'pitchfork 2.30.1\n' : 'pitchfork 2.30.0\n';
+
 for (const [tool, ref, version] of [
   ['aube', 'v2.7.0', '2.7.0 linux-x64 (2026-10-07)\n'],
-  ['pitchfork', 'v2.30.1', 'pitchfork 2.30.1\n'],
+  ['pitchfork', pitchforkRef, pitchforkVersion],
 ]) {
   test(`actual terrarium uses installed pack and latest ${tool}`, async ({
     page,

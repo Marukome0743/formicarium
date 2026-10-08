@@ -1,0 +1,164 @@
+{
+  "stage": "code-generation",
+  "unit": "u3-install",
+  "upstream_ids": [
+    "FR1",
+    "FR4",
+    "FR5",
+    "FR6",
+    "BR3.1",
+    "BR3.2",
+    "BR3.3",
+    "BR3.4",
+    "BR3.5",
+    "BR3.6",
+    "BR3.7",
+    "BR3.8",
+    "BR3.9",
+    "BR3.10",
+    "NFR1.1",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR6.1",
+    "NFR7.1",
+    "NFR8.1",
+    "NFR8.2"
+  ],
+  "coverage": [
+    {
+      "id": "FR1",
+      "status": "GAP",
+      "target": "scripts/migration-install/completion.ts"
+    },
+    {
+      "id": "FR4",
+      "status": "OK",
+      "target": "runtime/install.ts"
+    },
+    {
+      "id": "FR5",
+      "status": "OK",
+      "target": "runtime/install-lifecycle.ts"
+    },
+    {
+      "id": "FR6",
+      "status": "GAP",
+      "target": "scripts/migration-install/ci.ts"
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "runtime/install-catalog.ts"
+    },
+    {
+      "id": "BR3.2",
+      "status": "OK",
+      "target": "runtime/install-catalog.ts"
+    },
+    {
+      "id": "BR3.3",
+      "status": "OK",
+      "target": "runtime/install.ts"
+    },
+    {
+      "id": "BR3.4",
+      "status": "OK",
+      "target": "runtime/install-transfer.ts"
+    },
+    {
+      "id": "BR3.5",
+      "status": "OK",
+      "target": "runtime/install-archive.ts"
+    },
+    {
+      "id": "BR3.6",
+      "status": "OK",
+      "target": "runtime/guest-validation.ts"
+    },
+    {
+      "id": "BR3.7",
+      "status": "OK",
+      "target": "runtime/install.ts"
+    },
+    {
+      "id": "BR3.8",
+      "status": "OK",
+      "target": "runtime/install-lifecycle.ts"
+    },
+    {
+      "id": "BR3.9",
+      "status": "OK",
+      "target": "runtime/install-lifecycle.ts"
+    },
+    {
+      "id": "BR3.10",
+      "status": "GAP",
+      "target": "scripts/migration-install/completion.ts"
+    },
+    {
+      "id": "NFR1.1",
+      "status": "GAP",
+      "target": "scripts/migration-install/measure.ts"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "GAP",
+      "target": "scripts/migration-install/completion.ts"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "GAP",
+      "target": "scripts/migration-install/coverage.ts"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "tests/migration-install/catalog.test.ts"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "tests/migration-install/archive.test.ts"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "tests/migration-install/hash-regression.test.ts"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "tests/migration-install/transfer.test.ts"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "tests/migration-install/lifecycle.test.ts"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "tests/migration-install/consumer.spec.ts"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "tests/migration-install/lifecycle.test.ts"
+    },
+    {
+      "id": "NFR8.1",
+      "status": "GAP",
+      "target": "scripts/migration-install/ci.ts"
+    },
+    {
+      "id": "NFR8.2",
+      "status": "OK",
+      "target": "runtime/install-transfer.ts"
+    }
+  ]
+}

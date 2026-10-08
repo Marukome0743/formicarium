@@ -4,6 +4,97 @@ export interface Assets {
   workerURL: string | URL;
   buildInfoURL: string | URL;
 }
+export interface GuestBuildInfo {
+  schemaVersion: 1;
+  tool: string;
+  versionOrName: string;
+  source: { repository: string; commit: string };
+  target: 'x86_64-unknown-linux-musl';
+  rustc: string | null;
+  sourcePatches: readonly { name: string; sha256: string }[];
+  dependencies: readonly {
+    tool: string;
+    repository: string;
+    commit: string;
+    digest: string;
+  }[];
+  builderHash: string;
+  buildKey: string;
+  elfSha256: string;
+  [key: string]: unknown;
+}
+export interface GuestExpectation {
+  elfSha256: string;
+  buildInfoSha256: string;
+  identity: GuestBuildInfo;
+}
+export interface GuestHandle {
+  readonly digest: string;
+  readonly buildInfo: GuestBuildInfo;
+}
+export interface CatalogEntry {
+  tool: string;
+  versionOrName: string;
+  url: string;
+  format: 'elf' | 'tar.gz';
+  archiveEntry?: string;
+  downloadSha256: string;
+  downloadBytes: number;
+  elfBytes: number;
+  buildInfo: GuestBuildInfo;
+  buildInfoSha256: string;
+  [key: string]: unknown;
+}
+export interface GuestCatalog {
+  schemaVersion: 1;
+  catalogId: string;
+  defaults: Readonly<Record<string, string>>;
+  entries: readonly CatalogEntry[];
+  [key: string]: unknown;
+}
+export interface Progress {
+  operationId: string;
+  sequence: number;
+  phase: 'fetch' | 'extract' | 'digest' | 'validate' | 'register';
+  processedBytes: number;
+  totalBytes: number | null;
+}
+export interface InstallOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: Progress) => void;
+}
+export interface InstallResult {
+  operationId: string;
+  tool: string;
+  versionOrName: string;
+  digest: string;
+  buildKey: string;
+}
+export interface Installer {
+  install(selection: string, options?: InstallOptions): Promise<InstallResult>;
+}
+export declare function createInstaller(
+  session: Session,
+  catalog: GuestCatalog,
+): Installer;
+export declare function validateGuest(
+  bytes: Uint8Array,
+  expected: GuestExpectation,
+): GuestHandle;
+export declare function fixtureToFsEntries(
+  entries: readonly FsEntry[],
+): readonly FsEntry[];
+export declare function runValidatedGuest(
+  session: Session,
+  guest: GuestHandle,
+  options?: Omit<RunOptions, 'guest'>,
+): Promise<RunResult>;
+export declare function registerValidatedGuest(
+  session: Session,
+  tool: string,
+  guest: GuestHandle,
+  options?: { signal?: AbortSignal },
+): Promise<void>;
 export type FsEntry =
   | { path: string; type: 'dir'; mode: number }
   | {

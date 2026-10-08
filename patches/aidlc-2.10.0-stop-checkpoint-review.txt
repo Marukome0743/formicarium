@@ -1,0 +1,58 @@
+AI-DLC 2.10.0 Stop hook review — 2026-10-08
+
+Reviewed source: /private/tmp/aidlc-workflows-2.10.0
+Saved patch exactly matches the four source diffs against /private/tmp/aidlc-2.10.0-source.tar.gz (検証済み). Patch was not reapplied or changed.
+
+Review: No blocking defect identified in the two requested fixes (source review; runtime limits below).
+Checkpoint allow requires run-stage, approved === false, and either command_authorized === false or ready === true + verified === true + human_required === true. Automatic units, unverified authorized units, and approved units continue to the existing bounded blocking logic. Guard counters reset at a human wait. Codex continue-workflow bypasses both replay and response persistence; other targets retain deduplication except the existing compact SessionStart exemption.
+
+Validation (検証済み):
+- Added six tests pass.
+- Tests inheriting this chat environment: 175 pass / 6 fail.
+- Standalone fixture environment, without AIDLC_RULES_DIR/AIDLC_SESSION_OVERRIDE/AIDLC_SESSION_OVERRIDE_SOURCE inherited from this chat: 180 pass / 1 fail. Remaining existing test: divergent payload marker avoids refusal fail-open, expected sessionOverrideSource=payload, received null. Full 181/181 success was not reproduced. Log: /private/tmp/aidlc-stop-isolated-regression.log
+- bun run typecheck passes with both mise Bun and Node bin directories on PATH.
+- Biome check of four changed files passes.
+- Official native build passes all gates. build/binaries/build-results-native.json records package --check success and native gate success. Log: /private/tmp/aidlc-stop-native-isolated-build.log
+- Official config installation into /private/tmp/aidlc-stop-install-check succeeds using dry-run planToken then config --plan-token. Both installed hooks match dist-release generated output byte-for-byte.
+- Installed Stop command is aidlc engine adapter codex continue-workflow.
+- Native adapter smoke in the temporary project exits 0 with empty stdout/stderr. This project has no active workflow; this is NOT verification of an actual approval wait in Codex.
+
+Build commands (from source directory):
+export PATH=/Users/mutoakio/.local/share/mise/installs/bun/1.4.2/bin:/Users/mutoakio/.local/share/mise/installs/node/24/bin:$PATH
+bun run typecheck
+bun scripts/build-binaries.ts --target native
+For isolated fixture validation only, inherited chat session/rules environment was removed from test/build subprocesses. formicarium guard settings were not changed.
+
+Official project update procedure:
+aidlc config --project-dir /Users/mutoakio/Documents/formicarium --harness codex --from /private/tmp/aidlc-workflows-2.10.0/dist-release/codex --dry-run --json
+If planning is allowed, apply the identical arguments with --plan-token <data.planToken> --json instead of --dry-run. Do not apply unless the official plan succeeds.
+
+BLOCKED (検証済み): The dry-run above returns exit 4: refusing to refresh while 1 workflow(s) are active: default/261006-npm-terrarium-release. docs/guide/18-install-and-lifecycle.md Refresh Safety explicitly requires all active workflows complete; force/yes/plan-token do not bypass it. Parked workflows also remain active. Machine update/use does not refresh project files, so it does not establish repaired project hook deployment.
+
+formicarium installation and actual Codex approval-wait Stop behavior: 未検証 / not completed. U1 remains pending. Stop remains absent in formicarium. hooks.json.bak was not restored. Generated installed files were not edited. No workflow approval, stage advancement, PR, posting, or machine installation was performed.
+
+Next authorized safe path requires an officially supported refresh during an active workflow, or later completion of that workflow by its normal human approvals. This task did not implement a new refresh exception or advance the workflow to permit installation.
+
+Follow-up investigation — 2026-10-08
+
+Resolved test failure (検証済み):
+Sandbox rejects ps. macProcessIdentity() calls ps -o ppid=,lstart= -p <PID> and returns null on refusal. resolveSessionIdFromAncestry() therefore cannot see the ancestry-session PID record seeded by the existing regression test. hookChildEnv() sets AIDLC_SESSION_OVERRIDE_SOURCE=payload only when a known ancestor session differs from the payload. Missing ancestry correctly leaves the marker unset, so the sandbox run reports expected payload / actual null.
+
+Re-ran unchanged sources on the host with approved escalated execution, using temporary test projects and without inherited chat session/rules environment:
+export PATH=/Users/mutoakio/.local/share/mise/installs/bun/1.4.2/bin:/Users/mutoakio/.local/share/mise/installs/node/24/bin:$PATH
+env -u AIDLC_RULES_DIR -u AIDLC_SESSION_OVERRIDE -u AIDLC_SESSION_OVERRIDE_SOURCE bun test tests/integration/t121-stop-hook-enforce.test.ts tests/unit/t149-codex-hook-adapter.test.ts
+Result: exit 0, 181 pass, 0 fail, 1302 expect() calls, 39.37s. Log: /private/tmp/aidlc-stop-host-regression.log
+No source or test change was needed. Previous 180/181 result describes the restricted sandbox environment, not a remaining failure on the host. Formicarium guards were not disabled.
+
+Official active-workflow update investigation:
+- Documentation: docs/guide/18-install-and-lifecycle.md Refresh Safety: incomplete and parked workflows block project refresh; --force, --yes, --plan-token do not bypass it.
+- Source: core/tools/aidlc-init.ts assertRefreshSafe is called during planning and again under the audit lock before commit. No hook-only/maintenance/active-workflow refresh option was found in the 2.10.0 implementation.
+- Existing contract test refresh refuses an active workflow without changing project bytes passes. Log: /private/tmp/aidlc-active-refresh-contract.log
+- config runtime records diagnostic paths and does not rewrite commands. config trust verifies/instructs trust and does not regenerate seeds or permission rules. Doctor gives remediation, not an active-workflow hook refresh.
+- update/use only change machine installation. core/tools/aidlc.ts resolveHookPath prefers module-relative then project-installed hooks before packaged fallback. Replacing the machine executable alone does not establish the repaired Codex project adapter/Stop hook deployment.
+
+Conclusion (ドキュメント根拠, corroborated by source and regression): AI-DLC 2.10.0 has no supported project hook refresh that meets the requirement to preserve the current pending U1 workflow. Do not try force, park/archive, changing intent cursors, removing state or installation metadata, or editing generated installed hooks as substitutes.
+
+Suggested next development scope (提案 / 未実装): add an officially validated maintenance transaction for this exact hook repair. It must check the existing baseline, source authenticity/identity and compatibility; restrict updates to these two hooks, the official Stop registration and necessary ownership/trust metadata; preview the exact diff; keep workflow records, approval evidence, stage graph and all guard settings unchanged; commit atomically under the workspace lock; reject unsupported source differences; provide rollback; test approval-wait preservation before applying to formicarium. This is a new feature in authored framework source, not an available 2.10.0 command and not implemented by this investigation.
+
+Current deployment status: formicarium remains code-generation / Running / strict; Stop remains absent. U1 approval was not granted and the workflow was not advanced. No source patch changes, deployment, PR or external posting in this follow-up.

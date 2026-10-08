@@ -1,0 +1,346 @@
+import { errorCode } from './contracts.js';
+import { bindSessionPort } from './session-port.js';
+import { invalid } from './errors.js';
+function spawnErrorCode(error) {
+    const code = errorCode(error);
+    return code === 'UNSUPPORTED_ENV' || code === 'ASSET_LOAD'
+        ? code
+        : 'EXECUTION';
+}
+import { failure, safeCause } from './errors.js';
+import { identity, inspectMessage, joinBytes } from './protocol.js';
+import { validateRun } from './validation.js';
+let nextSessionId = 0;
+const defaultClock = () => globalThis.performance?.now() ?? Date.now();
+/** Adapter injection is internal; public package exports only environment APIs. */
+export function createLifecycle(state, { spawn, assets = { loaderURL: '', wasmURL: '', workerURL: '', buildInfoURL: '' }, clock = defaultClock, timers = globalThis, cleanupTimeoutMs = 1000, sessionId = `session-${++nextSessionId}`, }) {
+    let active = null;
+    let generation = 0;
+    let disposal = null;
+    let disposalFinished = false;
+    let resetting = null;
+    let cleanupFailure;
+    const received = (run) => ({
+        runId: run.runId,
+        stdout: joinBytes(run.streams.stdout),
+        stderr: joinBytes(run.streams.stderr),
+    });
+    const runFailure = (run, code) => failure(code, `Run failed: ${code}`, received(run));
+    const stopDeadline = (run) => timers.clearTimeout(run.deadlineTimer);
+    function scheduleDeadline(run) {
+        const remaining = run.deadline - clock();
+        if (remaining <= 0) {
+            terminate(run, { error: runFailure(run, 'TIMEOUT') });
+            return;
+        }
+        run.deadlineTimer = timers.setTimeout(() => scheduleDeadline(run), Math.min(remaining, 2_147_483_647));
+    }
+    function finish(run, cleanupError) {
+        stopDeadline(run);
+        run.input.signal?.removeEventListener('abort', run.abort);
+        let error = run.decision.error;
+        if (cleanupError) {
+            error = failure('EXECUTION', 'Worker cleanup could not be confirmed', {
+                ...received(run),
+                cause: safeCause(error?.code ?? 'EXECUTION'),
+            });
+            cleanupFailure = error;
+            state.dispose();
+        }
+        if (state.isDisposed)
+            state.dispose();
+        else if (!error) {
+            try {
+                state.commit(run.decision.snapshot, run.reservation);
+            }
+            catch (cause) {
+                error = runFailure(run, errorCode(cause) === 'SNAPSHOT'
+                    ? 'SNAPSHOT'
+                    : errorCode(cause) === 'ABORTED'
+                        ? 'ABORTED'
+                        : 'EXECUTION');
+            }
+        }
+        if (run.releaseOnFinish)
+            state.release(run.reservation);
+        active = null;
+        run.phase = 'settled';
+        run.complete();
+        if (error)
+            run.reject(error);
+        else
+            run.resolve({
+                ...run.decision.result,
+                elapsedMs: Math.max(0, clock() - run.startedAt),
+            });
+        if (run.disposeResolve) {
+            if (cleanupError)
+                run.disposeReject?.(error);
+            else
+                run.disposeResolve();
+        }
+    }
+    function terminate(run, decision) {
+        if (run.phase === 'settled')
+            return;
+        if (run.phase === 'terminating') {
+            // Abort/dispose can invalidate a validated done candidate during cleanup.
+            if (decision.error?.code === 'ABORTED' && !run.decision.error)
+                run.decision = decision;
+            if (state.isDisposed)
+                run.decision = { error: runFailure(run, 'ABORTED') };
+            return;
+        }
+        run.phase = 'terminating';
+        run.decision = decision;
+        stopDeadline(run);
+        let watchdog;
+        const deadline = new Promise((_, reject) => {
+            watchdog = timers.setTimeout(() => reject(new Error('cleanup deadline')), cleanupTimeoutMs);
+        });
+        const cleanup = Promise.resolve().then(() => {
+            run.worker?.detach?.();
+            return run.worker?.terminate();
+        });
+        Promise.race([cleanup, deadline]).then(() => {
+            timers.clearTimeout(watchdog);
+            finish(run, false);
+        }, () => {
+            timers.clearTimeout(watchdog);
+            finish(run, true);
+        });
+    }
+    function message(run, value) {
+        if (run.phase === 'terminating' || run.phase === 'settled')
+            return;
+        if (clock() >= run.deadline) {
+            terminate(run, { error: runFailure(run, 'TIMEOUT') });
+            return;
+        }
+        if (run.input.signal?.aborted || state.isDisposed) {
+            terminate(run, { error: runFailure(run, 'ABORTED') });
+            return;
+        }
+        try {
+            const parsed = inspectMessage(value, run, run.streams);
+            if (!parsed)
+                return;
+            if (parsed.type === 'output') {
+                run.sequence++;
+                run.streams[parsed.chunk.stream].push(new Uint8Array(parsed.chunk.bytes));
+                run.input.onOutput?.({
+                    ...parsed.chunk,
+                    bytes: new Uint8Array(parsed.chunk.bytes),
+                });
+            }
+            else if (parsed.type === 'error')
+                terminate(run, { error: runFailure(run, parsed.code) });
+            else {
+                const snapshot = state.validateSnapshot(parsed.snapshot);
+                terminate(run, { snapshot, result: parsed.result });
+            }
+        }
+        catch (error) {
+            terminate(run, {
+                error: runFailure(run, errorCode(error) === 'SNAPSHOT' ? 'SNAPSHOT' : 'EXECUTION'),
+            });
+        }
+    }
+    function run(options, reserved) {
+        let input;
+        let entries;
+        let reservation;
+        try {
+            if (reserved)
+                state.assertCurrent(reserved);
+            else
+                state.assertIdle();
+            input = validateRun(options, state.home);
+            reservation = reserved ?? state.acquire('run');
+            entries = state.snapshot(reservation);
+            input.signal = input.signal
+                ? AbortSignal.any([input.signal, reservation.signal])
+                : reservation.signal;
+        }
+        catch (error) {
+            return Promise.reject(error);
+        }
+        generation++;
+        const startedAt = clock();
+        let complete;
+        const completed = new Promise((resolve) => {
+            complete = resolve;
+        });
+        const handle = {
+            reservation,
+            releaseOnFinish: !reserved,
+            completed,
+            complete,
+            sessionId,
+            runId: `${sessionId}:${generation}`,
+            generation,
+            input,
+            phase: 'preparing',
+            startedAt,
+            deadline: startedAt + input.timeoutMs,
+            sequence: 0,
+            streams: { stdout: [], stderr: [] },
+            decision: {},
+            resolve: () => { },
+            reject: () => { },
+            abort: () => { },
+        };
+        active = handle;
+        const result = new Promise((resolve, reject) => {
+            handle.resolve = resolve;
+            handle.reject = reject;
+        });
+        handle.abort = () => terminate(handle, { error: runFailure(handle, 'ABORTED') });
+        input.signal?.addEventListener('abort', handle.abort, { once: true });
+        scheduleDeadline(handle);
+        try {
+            const request = {
+                ...identity(handle),
+                type: 'run',
+                assets: { ...assets },
+                guest: input.guest,
+                args: input.args,
+                env: input.env,
+                cwd: state.cwd,
+                home: state.home,
+                entries,
+                snapshotRoots: [...state.roots],
+            };
+            handle.worker = spawn(request, {
+                message: (value) => message(handle, value),
+                error: (error) => terminate(handle, {
+                    error: runFailure(handle, spawnErrorCode(error)),
+                }),
+                exit: () => {
+                    if (handle.phase !== 'terminating' && handle.phase !== 'settled')
+                        terminate(handle, { error: runFailure(handle, 'EXECUTION') });
+                },
+            });
+            handle.phase = handle.phase === 'preparing' ? 'running' : handle.phase;
+        }
+        catch (error) {
+            const code = spawnErrorCode(error);
+            terminate(handle, { error: runFailure(handle, code) });
+        }
+        return result;
+    }
+    function dispose() {
+        if (disposal && !disposalFinished)
+            return disposal;
+        if (state.isDisposed && !active)
+            return Promise.resolve();
+        const waiting = state.beginDispose();
+        disposal = waiting
+            .then(() => {
+            state.dispose();
+            if (cleanupFailure)
+                throw cleanupFailure;
+        })
+            .finally(() => {
+            disposalFinished = true;
+        });
+        return disposal;
+    }
+    function reset() {
+        if (state.isDisposed)
+            return Promise.reject(failure('DISPOSED', 'Session has been disposed'));
+        if (resetting)
+            return resetting;
+        const waiting = state.beginReset();
+        resetting = waiting
+            .then(() => {
+            if (cleanupFailure)
+                throw cleanupFailure;
+            state.finishReset();
+        })
+            .finally(() => {
+            resetting = null;
+        });
+        return resetting;
+    }
+    const operation = (fn) => (...args) => {
+        try {
+            return Promise.resolve(fn(...args));
+        }
+        catch (error) {
+            return Promise.reject(error);
+        }
+    };
+    const fsOperation = (fn) => (...args) => {
+        let reservation;
+        try {
+            reservation = state.acquire('fs');
+        }
+        catch (error) {
+            return Promise.reject(error);
+        }
+        try {
+            return Promise.resolve(fn(reservation, ...args));
+        }
+        catch (error) {
+            return Promise.reject(error);
+        }
+        finally {
+            state.release(reservation);
+        }
+    };
+    const session = Object.freeze({
+        run,
+        dispose,
+        readFile: fsOperation((r, path) => state.readFile(path, r)),
+        remove: fsOperation((r, path) => state.remove(path, r)),
+        listEntries: fsOperation((r, path) => state.listEntries(path, r)),
+        setCwd: fsOperation((r, path) => state.setCwd(path, r)),
+        reset,
+    });
+    bindSessionPort(session, {
+        acquire: operation((kind) => state.acquire(kind)),
+        commitGuest: operation((r, tool, guest) => state.commitGuest(r, tool, guest)),
+        runInstalled: (r, tool, args, options) => {
+            try {
+                return run({ ...options, guest: state.installedGuest(r, tool), args }, r);
+            }
+            catch (error) {
+                return Promise.reject(error);
+            }
+        },
+        release: async (r) => {
+            const current = active;
+            if (current?.reservation === r)
+                await current.completed;
+            state.release(r);
+        },
+        builtin: operation((r, argv) => {
+            state.assertCurrent(r);
+            invalid(Array.isArray(argv) &&
+                argv.every((arg) => typeof arg === 'string' && !arg.includes('\0')), 'builtin argv invalid');
+            let stdout = new Uint8Array();
+            if (argv[0] === 'ls' && argv.length <= 2)
+                stdout = new TextEncoder().encode(state
+                    .listEntries(argv[1], r)
+                    .map((entry) => entry.path.slice(entry.path.lastIndexOf('/') + 1))
+                    .join('\n') + '\n');
+            else if (argv[0] === 'cat' && argv.length === 2)
+                stdout = state.readFile(argv[1], r);
+            else if (argv[0] === 'cd' && argv.length === 2)
+                state.setCwd(argv[1], r);
+            else if (argv[0] === 'rm' && argv[1] === '-rf' && argv.length === 3)
+                state.remove(argv[2], r);
+            else
+                invalid(false, 'builtin argv unsupported');
+            return {
+                kind: 'builtin',
+                exitCode: 0,
+                stdout,
+                stderr: new Uint8Array(),
+            };
+        }),
+    });
+    return session;
+}
+//# sourceMappingURL=lifecycle.js.map

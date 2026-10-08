@@ -30,9 +30,16 @@ test('aube #1645 の書き起こしが native と一致する', async ({ page })
   );
   const result = await page.evaluate(() => window.formicariumResult!);
   expect(result.error).toBeUndefined();
+  expect(result.steps?.map((step) => step.command)).toEqual([
+    'aube install',
+    'rm -rf node_modules',
+    'aube install --frozen-lockfile',
+    'aube list',
+  ]);
+  expect(result.steps?.map((step) => step.exitCode)).toEqual([0, 0, 0, 0]);
   expect(normalizeTranscript(result.transcript!)).toBe(baseline);
-  // #1645 の症状：frozen install と list が file:/link: の依存を 0.0.0 と表示する
-  expect(result.transcript!).toContain('0.0.0');
+  // 修正済み v2.7.0 の native と同じ file:/link: 依存の版を検査する。
+  expect(result.transcript!).toContain('├── filedep 1.0.0\n└── linked 2.0.0\n');
 });
 
 test('一覧にない手順は実行しない', async ({ page }) => {

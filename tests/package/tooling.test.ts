@@ -1,9 +1,33 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Script } from 'node:vm';
+import { copySharedTestHelpers } from '../../scripts/package/coverage.js';
 import { compiledTestConfig } from '../../scripts/playwright-build-config.js';
+
+test('coverage preparation preserves shared assertion helpers imported by selected tests', async () => {
+  const scratch = await mkdtemp(resolve(tmpdir(), 'formicarium-coverage-'));
+  try {
+    const out = resolve(scratch, 'instrumented');
+    await copySharedTestHelpers(
+      fileURLToPath(new URL('../../', import.meta.url)),
+      out,
+    );
+    const original = await readFile(
+      new URL('../shared/assertions.js', import.meta.url),
+    );
+    const helperPath = resolve(out, 'tests/shared/assertions.js');
+    assert.deepEqual(await readFile(helperPath), original);
+    const helpers = await import(pathToFileURL(helperPath).href);
+    assert.ok(Object.keys(helpers).length > 0);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
 
 for (const suite of ['package', 'guest-distribution'])
   test(

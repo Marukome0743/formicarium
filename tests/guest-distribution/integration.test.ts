@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test, { after, before } from 'node:test';
 import { resolveGuest } from '../../integration/terrarium/guest-distribution/resolver.js';
+import { stageDistribution } from '../../scripts/guest-distribution/stage.js';
 import { createSyntheticSite, serveDistribution } from './serve.js';
 
 let synthetic: Awaited<ReturnType<typeof createSyntheticSite>>,
@@ -29,7 +31,7 @@ const select = (ref?: string, fixture?: string) =>
     base: `${server.base}synthetic/`,
   });
 
-test('synthetic HTTP contract: two refs resolve independently to expected bytes and seed', async () => {
+test('synthetic HTTP contract: two refs resolve independently to expected bytes and seed', async (t) => {
   const results = [];
   for (const ref of ['main', 'pr-1645']) {
     const selected = await select(ref);
@@ -49,6 +51,65 @@ test('synthetic HTTP contract: two refs resolve independently to expected bytes 
     results[1].build.source.commit,
   );
   assert.notDeepEqual(results[0].guest, results[1].guest);
+  // Adding only the newer ref must still produce a complete standalone site.
+  const directory = await mkdtemp(join(tmpdir(), 'retained-ref-http-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const tools = JSON.parse(
+    await readFile(join(synthetic.site, 'tools.json'), 'utf8'),
+  );
+  const manifest = JSON.parse(
+    await readFile(join(synthetic.site, 'dist/builds.json'), 'utf8'),
+  );
+  const latest = results[1].build;
+  const candidate = join(directory, 'site');
+  const next = Object.assign(
+    {
+      tools,
+      manifest,
+      builds: [
+        {
+          tool: 'aube',
+          ref: latest.ref,
+          guestPath: join(synthetic.site, latest.guest.url),
+          buildInfoPath: join(synthetic.site, latest.buildInfo.url),
+          fixturePaths: Object.fromEntries(
+            Object.entries(latest.fixtures).map(([name, asset]) => [
+              name,
+              join(synthetic.site, asset.url),
+            ]),
+          ),
+        },
+      ],
+    },
+    { existingRoot: synthetic.site },
+  );
+  await stageDistribution(next, candidate);
+  const retainedServer = await serveDistribution({ synthetic: candidate });
+  t.after(() => retainedServer.close());
+  for (const expected of results) {
+    const selected = await resolveGuest({
+      tool: 'aube',
+      ref: expected.build.ref,
+      base: `${retainedServer.base}synthetic/`,
+    });
+    assert.deepEqual(selected.guest, expected.guest);
+    assert.deepEqual(selected.entries, expected.entries);
+    assert.equal(selected.build.source.commit, expected.build.source.commit);
+    for (const asset of [
+      selected.build.guest,
+      selected.build.buildInfo,
+      ...Object.values(selected.build.fixtures),
+    ]) {
+      const response = await fetch(
+        new URL(asset.url, `${retainedServer.base}synthetic/`),
+      );
+      assert.equal(response.status, 200);
+      assert.equal(
+        hash(new Uint8Array(await response.arrayBuffer())),
+        asset.sha256,
+      );
+    }
+  }
 });
 
 test('synthetic default/explicit empty fixture survives HTTP boundary', async () => {

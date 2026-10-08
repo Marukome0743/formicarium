@@ -6,6 +6,17 @@ import { elfHeader, serveDirectory } from './fixtures.js';
 let server: Awaited<ReturnType<typeof serveDirectory>>;
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const guest = [...elfHeader()];
+type CpuTimeoutObservation = {
+  ready: boolean;
+  settled: boolean;
+  at49(): Promise<{ settled: boolean; busy: string | undefined }>;
+  finish(): Promise<{
+    timeout: string | undefined;
+    count: number;
+    disposed: string | undefined;
+  }>;
+  cleanup(): Promise<void>;
+};
 test.beforeAll(async () => {
   server = await serveDirectory(root);
 });
@@ -169,29 +180,141 @@ test('cross-origin Worker is explicitly rejected instead of blob fallback', asyn
 test('CPU-bound browser Worker timeout releases BUSY reservation after termination', async ({
   page,
 }) => {
-  const result = await page.evaluate(async (guest) => {
-    const { createSession } = await import('/runtime/web/api.js');
-    const assets = {
-      loaderURL: `${location.origin}/missing`,
-      wasmURL: `${location.origin}/missing`,
-      buildInfoURL: `${location.origin}/missing`,
-      workerURL: `${location.origin}/tests/package/fixtures/quiet-worker.js`,
-    };
-    const session = await createSession({ assets });
-    const running = session
-      .run({ guest: Uint8Array.from(guest), timeoutMs: 50 })
-      .catch((error: ExecutionError) => error.code);
-    let busy: string | undefined;
-    try {
-      await session.listEntries();
-    } catch (caught) {
-      const error = caught as ExecutionError;
-      busy = error.code;
-    }
-    const timeout = await running;
-    const entries = await session.listEntries();
-    await session.dispose();
-    return { busy, timeout, count: entries.length };
-  }, guest);
-  expect(result).toEqual({ busy: 'BUSY', timeout: 'TIMEOUT', count: 0 });
+  const clockStart = new Date('2026-10-09T00:00:00Z');
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(new Date(clockStart.getTime() + 1000));
+  try {
+    await page.evaluate(async (guest) => {
+      const original = globalThis.Worker;
+      const workers: Worker[] = [];
+      const listeners = new Map<Worker, (event: MessageEvent) => void>();
+      const observation = {
+        ready: false,
+        settled: false,
+      } as CpuTimeoutObservation;
+      globalThis.Worker = class extends original {
+        constructor(...args: ConstructorParameters<typeof Worker>) {
+          super(...args);
+          workers.push(this);
+          const listener = (event: MessageEvent) => {
+            if (event.data?.type !== 'formicarium-test-cpu-ready') return;
+            event.stopImmediatePropagation();
+            observation.ready = true;
+          };
+          listeners.set(this, listener);
+          this.addEventListener('message', listener);
+        }
+      };
+      (
+        globalThis as unknown as {
+          cpuTimeoutObservation: CpuTimeoutObservation;
+        }
+      ).cpuTimeoutObservation = observation;
+      let session:
+        | Awaited<
+            ReturnType<typeof import('../../runtime/web/api.js').createSession>
+          >
+        | undefined;
+      observation.cleanup = async () => {
+        try {
+          await session?.dispose();
+        } finally {
+          for (const worker of workers) {
+            worker.removeEventListener('message', listeners.get(worker)!);
+            worker.terminate();
+          }
+          globalThis.Worker = original;
+        }
+      };
+      try {
+        const { createSession } = await import('/runtime/web/api.js');
+        const assets = {
+          loaderURL: `${location.origin}/missing`,
+          wasmURL: `${location.origin}/missing`,
+          buildInfoURL: `${location.origin}/missing`,
+          workerURL: `${location.origin}/tests/package/fixtures/cpu-ready-worker.js`,
+        };
+        session = await createSession({ assets });
+        const running = session
+          .run({ guest: Uint8Array.from(guest), timeoutMs: 50 })
+          .then(
+            () => undefined,
+            (error: ExecutionError) => error.code,
+          )
+          .then((code) => {
+            observation.settled = true;
+            return code;
+          });
+        observation.at49 = async () => {
+          let busy: string | undefined;
+          try {
+            await session!.listEntries();
+          } catch (caught) {
+            const error = caught as ExecutionError;
+            busy = error.code;
+          }
+          return { settled: observation.settled, busy };
+        };
+        observation.finish = async () => {
+          const timeout = await running;
+          const entries = await session!.listEntries();
+          await session!.dispose();
+          let disposed: string | undefined;
+          try {
+            await session!.listEntries();
+          } catch (error) {
+            disposed = (error as ExecutionError).code;
+          }
+          return { timeout, count: entries.length, disposed };
+        };
+      } catch (error) {
+        await observation.cleanup();
+        throw error;
+      }
+    }, guest);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                globalThis as unknown as {
+                  cpuTimeoutObservation: CpuTimeoutObservation;
+                }
+              ).cpuTimeoutObservation.ready,
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+    await page.clock.runFor(49);
+    expect(
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as {
+            cpuTimeoutObservation: CpuTimeoutObservation;
+          }
+        ).cpuTimeoutObservation.at49(),
+      ),
+    ).toEqual({ settled: false, busy: 'BUSY' });
+    await page.clock.runFor(1);
+    expect(
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as {
+            cpuTimeoutObservation: CpuTimeoutObservation;
+          }
+        ).cpuTimeoutObservation.finish(),
+      ),
+    ).toEqual({ timeout: 'TIMEOUT', count: 0, disposed: 'DISPOSED' });
+  } finally {
+    if (!page.isClosed())
+      await page.evaluate(async () => {
+        const state = (
+          globalThis as unknown as {
+            cpuTimeoutObservation?: CpuTimeoutObservation;
+          }
+        ).cpuTimeoutObservation;
+        await state?.cleanup();
+      });
+  }
 });

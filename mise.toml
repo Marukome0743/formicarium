@@ -1,8 +1,72 @@
 # formicarium の開発ツール。emsdk は mise ではなく ~/AppData/Local/emsdk
 # （Windows 以外では ~/emsdk）を使う。scripts/emscripten-env.sh を参照。
 [tools]
-"github:awslabs/aidlc-workflows" = { version = "2.10.0", matching_regex = "^aidlc-(darwin|linux|windows)-", bin = "aidlc", additional_asset_patterns = ["aidlc-runtime-{{ version }}.tar.gz"] }
-node = "24"
+"github:awslabs/aidlc-workflows" = { version = "2.11.1-preview.20261012.1", matching_regex = "^aidlc-(darwin|linux|windows)-", bin = "aidlc", additional_asset_patterns = ["aidlc-runtime-{{ version }}.tar.gz"] }
+node = "24.21.0"
+bun = "1.4.2"
 rust = { version = "stable", targets = "x86_64-unknown-linux-musl" }
 cmake = "4"
 ninja = "1"
+
+[tasks.install-frozen]
+run = "node scripts/ci/tasks.ts install-frozen"
+
+[tasks.build]
+run = "node scripts/ci/tasks.ts build"
+
+[tasks.typecheck]
+run = "node scripts/ci/tasks.ts typecheck"
+
+[tasks.check]
+run = "node scripts/ci/tasks.ts lint"
+
+[tasks.test-light]
+run = "node scripts/ci/tasks.ts test-light"
+
+[tasks.test-consumer]
+run = "node scripts/ci/tasks.ts test-consumer"
+
+[tasks.verify-candidate]
+run = "node scripts/ci/tasks.ts verify-candidate"
+
+[tasks.migration-preflight-unit]
+run = "node --test --test-concurrency=1 tests/migration-preflight/evidence.test.js tests/migration-preflight/assets.test.js tests/migration-preflight/runner.test.js tests/migration-preflight/prepare-mirror.test.js tests/migration-preflight/baseline.test.js tests/migration-preflight/verify.test.js tests/migration-preflight/completion.test.js"
+
+[tasks.migration-preflight-browser]
+run = "node node_modules/@playwright/test/cli.js test --config tests/migration-preflight/playwright.config.ts"
+
+[tasks.migration-preflight-verify]
+run = "node scripts/migration-preflight/verify.js"
+
+[tasks.migration-preflight-current-unit]
+run = "node --test --test-concurrency=1 tests/migration-preflight/current-completion.test.js"
+
+[tasks.migration-preflight-completion]
+run = "node scripts/migration-preflight/completion.js"
+
+[tasks.migration-session-unit]
+run = "node --test --test-concurrency=1 tests/migration-session/guest-validation.test.js tests/migration-session/fixture.test.js tests/migration-session/reservation.test.js tests/migration-session/public.test.js tests/migration-session/consumer.test.js"
+
+[tasks.migration-session-browser]
+run = "node node_modules/@playwright/test/cli.js test --config tests/migration-session/playwright.config.ts tests/migration-session/consumer.spec.ts"
+
+[tasks.migration-session-stage]
+run = "node scripts/migration-session/stage.js"
+
+[tasks.migration-session-completion]
+run = "node scripts/migration-session/completion.js"
+
+[tasks.migration-install-unit]
+run = "node --test --test-concurrency=1 tests/migration-install/runner-ready.test.js tests/migration-install/catalog.test.js tests/migration-install/transfer.test.js tests/migration-install/archive.test.js tests/migration-install/lifecycle.test.js tests/migration-install/public.test.js tests/migration-install/consumer.test.js tests/migration-install/hash-regression.test.js"
+
+[tasks.migration-install-browser]
+run = "node node_modules/@playwright/test/cli.js test tests/migration-install/consumer.spec.ts tests/migration-install/hash-regression.spec.ts --config tests/migration-install/playwright.config.ts --workers=1 --retries=0"
+
+[tasks.migration-install-stage]
+run = "node scripts/migration-install/stage.js"
+
+[tasks.migration-install-completion]
+run = "node scripts/migration-install/completion.js"
+
+[tasks.migration-install-measure]
+run = "node scripts/migration-install/measure.js"

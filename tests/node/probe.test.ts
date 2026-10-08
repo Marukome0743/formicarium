@@ -36,6 +36,25 @@ async function runProbe(args: string[]) {
 }
 
 describe('probe（Node.js の Worker）', () => {
+  it('BSF zero は native 互換 destination と ZF を保持し非zero controlsも通る', {
+    timeout: TIMEOUT_MS,
+  }, async () => {
+    const { exitCode, stdout, stderr } = await runProbe(['bsf-zero']);
+    assert.equal(
+      stdout.trim(),
+      'PASS bsf-zero',
+      `stdout:\n${stdout}\nstderr:\n${stderr}`,
+    );
+    assert.equal(exitCode, 0, stderr);
+    assert.match(stderr, /bsf 16-nonzero destination=15 zf=0 expected=15\/0/);
+    assert.match(stderr, /bsf 32-nonzero destination=15 zf=0 expected=15\/0/);
+    assert.match(stderr, /bsf 64-nonzero destination=63 zf=0 expected=63\/0/);
+    assert.match(stderr, /bsf 64-zero destination=64 zf=1 expected=64\/1/);
+    assert.match(
+      stderr,
+      /bsf 64-zero-to-nonzero destination=15 zf=0 expected=15\/0/,
+    );
+  });
   it('loopback1: bitset 不一致 wake が絶対期限を短縮しない', {
     timeout: TIMEOUT_MS,
   }, async () => {

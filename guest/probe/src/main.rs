@@ -19,6 +19,8 @@ type Check = fn() -> Result<(), String>;
 mod futex_deadline;
 mod page_fault_race;
 mod madvise_dontneed;
+mod madvise_purge_reuse;
+mod bsf_zero;
 
 const CHECKS: &[(&str, Check)] = &[
     ("tokio-timer", tokio_timer),
@@ -35,11 +37,31 @@ fn main() {
     let mut selected: Vec<String> = std::env::args().skip(1).collect();
     let diagnostic = selected.iter().any(|arg| arg == "--diagnostic");
     selected.retain(|arg| arg != "--diagnostic");
+    if selected == ["bsf-zero"] {
+        match bsf_zero::check() {
+            Ok(()) => println!("PASS bsf-zero"),
+            Err(error) => {
+                println!("FAIL bsf-zero: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if selected == ["futex-deadline"] {
         match futex_deadline::check() {
             Ok(()) => println!("PASS futex-deadline"),
             Err(error) => {
                 println!("FAIL futex-deadline: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    if selected == ["madvise-purge-reuse"] {
+        match madvise_purge_reuse::check() {
+            Ok(()) => println!("PASS madvise-purge-reuse"),
+            Err(error) => {
+                println!("FAIL madvise-purge-reuse: {error}");
                 std::process::exit(1);
             }
         }

@@ -3,6 +3,6 @@
 # upstream との差分は `git -C .vendor/blink diff <upstream_commit> <commit>` で一覧できる。
 url=https://github.com/aletheia-works/blink.git
 branch=formicarium-wasm
-commit=4b5c67d518b0504e13ccde7ba7823f9b6e467c4c
+commit=a882fb2f3df14115b7e46f6812fb296eef5934d7
 upstream_url=https://github.com/jart/blink.git
 upstream_commit=f006a4fc6f9b8de9272504fdff0dbbe5ce5dc580

@@ -11,6 +11,7 @@ export type LegacyBuild = Omit<Partial<GuestBuild>, 'source'> & {
   [key: string]: unknown;
 };
 export interface DistributionInput {
+  existingRoot?: string;
   tools: Record<
     string,
     { cwd?: string; fixture?: string; default?: string; [key: string]: unknown }
@@ -24,8 +25,10 @@ export interface DistributionInput {
 
 import { createHash } from 'node:crypto';
 import {
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -45,6 +48,84 @@ const hash = (bytes: Uint8Array) =>
 const json = (value: unknown) =>
   Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 const localBase = 'https://distribution.invalid/';
+
+/** Prior files remain standalone assets; no symlink can reach outside the root. */
+async function existingFiles(root: string) {
+  const directory = resolve(root);
+  const files = new Map<string, Uint8Array>();
+  async function walk(path: string, prefix = ''): Promise<void> {
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink() || !stat.isDirectory())
+      throw new Error(
+        'producer: existing root must be a real directory without symlinks',
+      );
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const target = join(path, entry.name);
+      if (entry.isDirectory()) await walk(target, name);
+      else if (entry.isFile())
+        files.set(name, new Uint8Array(await readFile(target)));
+      else
+        throw new Error('producer: retained symlink or special asset refused');
+    }
+  }
+  await walk(directory);
+  return files;
+}
+
+function retainedAsset(
+  files: Map<string, Uint8Array>,
+  asset: { url: string; sha256: string },
+) {
+  if (
+    typeof asset?.url !== 'string' ||
+    !asset.url ||
+    /^[a-z][a-z0-9+.-]*:/i.test(asset.url) ||
+    /[\\?#\0]/.test(asset.url) ||
+    asset.url.startsWith('/')
+  )
+    throw new Error('producer: retained asset path must be relative');
+  const parts = asset.url.split('/').map((part) => decodeURIComponent(part));
+  if (
+    parts.some(
+      (part) => !part || part === '.' || part === '..' || /[\\/\0]/.test(part),
+    )
+  )
+    throw new Error('producer: retained asset path outside root');
+  const bytes = files.get(parts.join('/'));
+  if (!bytes)
+    throw new Error('producer: retained asset missing from existing root');
+  if (hash(bytes) !== asset.sha256)
+    throw new Error('producer: retained asset SHA-256 mismatch');
+  return bytes;
+}
+
+function validateRetained(
+  manifest: DistributionInput['manifest'],
+  selected: Set<string>,
+  files: Map<string, Uint8Array>,
+  input: DistributionInput,
+) {
+  for (const [tool, builds] of Object.entries(manifest.builds ?? {})) {
+    for (const [ref, entry] of Object.entries(builds)) {
+      if (selected.has(`${tool}\0${ref}`)) continue;
+      if (!input.existingRoot)
+        throw new Error('producer: retained ref requires existing root');
+      if (entry.schemaVersion !== 1) continue;
+      const build = validateBuild(entry, { tool, ref, base: localBase });
+      validateGuestElf(retainedAsset(files, build.guest));
+      validateProvenance(
+        parseInfo(retainedAsset(files, build.buildInfo)),
+        build,
+      );
+      for (const asset of Object.values(build.fixtures)) {
+        convertFixture(parseInfo(retainedAsset(files, asset)), {
+          cwd: input.tools[tool]?.cwd ?? '/work',
+        });
+      }
+    }
+  }
+}
 
 async function readAsset(path: string, target: string) {
   if (typeof path !== 'string' || !path)
@@ -148,8 +229,11 @@ export async function stageDistribution(
   output: string,
 ) {
   const manifest = inputCatalog(input);
-  const files = new Map<string, Uint8Array>();
-  const selected = new Set();
+  const files =
+    input.existingRoot === undefined
+      ? new Map<string, Uint8Array>()
+      : await existingFiles(input.existingRoot);
+  const selected = new Set<string>();
   for (const item of input.builds) {
     const key = `${item?.tool}\0${item?.ref}`;
     if (selected.has(key)) throw new Error('producer: duplicate tool/ref');
@@ -165,6 +249,7 @@ export async function stageDistribution(
     });
     for (const [path, bytes] of prepared.files) files.set(path, bytes);
   }
+  validateRetained(manifest, selected, files, input);
   files.set('tools.json', json(input.tools));
   files.set('dist/builds.json', json(manifest));
   if (typeof output !== 'string' || !output)

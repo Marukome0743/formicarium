@@ -1,24 +1,241 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import type { TestContext } from 'node:test';
 import test from 'node:test';
 import { createInstrumenter } from 'istanbul-lib-instrument';
 import type { Measurement } from '../../scripts/coverage-types.js';
 import {
   BROWSER_TITLES,
   componentImport,
+  copyCoverageDependencies,
+  executionVerifierSource,
   FILES,
   finalizeNodeMeasurement,
   mergeMeasurements,
   nodePreloadSource,
   prepareCoverage,
   REQUIRED_U1_REALMS,
+  reportCoverage,
+  sealCoverage,
 } from '../../scripts/terrarium/coverage.js';
-import { sha256 } from '../../scripts/terrarium/evidence.js';
+import { directoryIdentity, sha256 } from '../../scripts/terrarium/evidence.js';
 
 const _require = createRequire(import.meta.url);
+
+/** Dedicated complete report fixture: original assets/maps stay immutable. */
+async function reportFixture(
+  t: TestContext,
+  beforeSeal?: (out: string, base: string) => Promise<void>,
+) {
+  const base = await realpath(
+    await mkdtemp(join(tmpdir(), 'u4-copy-binding-')),
+  );
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const out = join(base, 'out');
+  const originalSite = join(base, 'original-site');
+  await mkdir(originalSite);
+  await writeFile(join(originalSite, 'asset'), 'original candidate');
+  await mkdir(join(out, 'receipts'), { recursive: true });
+  await mkdir(join(out, 'browser-results'));
+  const f = fixture();
+  const digests = [];
+  for (const row of f.inventory.digests) {
+    const original = join(base, 'original-source', row.path);
+    await mkdir(dirname(original), { recursive: true });
+    const source = 'export function unused(){return 1;}\n';
+    await writeFile(original, source);
+    digests.push({ ...row, original, sourceSha256: sha256(source) });
+  }
+  const candidate = await directoryIdentity(originalSite);
+  const reportPath = join(base, 'u1-coverage-v11', 'coverage-report.json');
+  await mkdir(dirname(reportPath));
+  const component = {
+    candidateSha256: f.inventory.tarballSha256,
+    threshold: 80,
+    passed: true,
+    realmNames: [...REQUIRED_U1_REALMS],
+    digests: digests.slice(0, 14),
+    files: f.inventory.metadata.slice(0, 14).map((file) => ({
+      path: file.path,
+      lines: Object.fromEntries(
+        Object.values(file.statementMap).map((statement) => [
+          String(statement.start.line),
+          1,
+        ]),
+      ),
+    })),
+  };
+  const componentBytes = JSON.stringify(component);
+  await writeFile(reportPath, componentBytes);
+  const inventory = {
+    ...f.inventory,
+    digests,
+    sourceIdentity: sha256(JSON.stringify(digests)),
+    candidate,
+    u1Report: reportPath,
+    u1ReportSha256: sha256(componentBytes),
+  };
+  await writeFile(join(out, 'inventory.json'), JSON.stringify(inventory));
+  const module = join(
+    out,
+    'terrarium/packages/terrarium/src/formicarium/session.ts',
+  );
+  const bundle = join(out, 'site/web/terrarium.mjs');
+  await mkdir(dirname(module), { recursive: true });
+  await mkdir(dirname(bundle), { recursive: true });
+  await writeFile(module, 'export const instrumented = 1;');
+  await writeFile(bundle, 'export const bundled = 1;');
+  await writeFile(join(out, 'node-preload.mjs'), 'fixture preload');
+  await writeFile(join(out, 'execution-verifier.mjs'), executionVerifierSource);
+  await beforeSeal?.(out, base);
+  const { executionIdentity } = await sealCoverage(out);
+  const coverage = Object.fromEntries(
+    f.inventory.metadata.map((file) => {
+      const measured = structuredClone(file);
+      for (const key of Object.keys(measured.s)) measured.s[key] = 1;
+      return [file.path, measured];
+    }),
+  );
+  for (const [index, row] of f.rows.entries()) {
+    const receipt = {
+      ...row,
+      executionIdentity,
+      sourceIdentity: inventory.sourceIdentity,
+      candidateSha256: candidate.sha256,
+      coverage: index === 0 ? coverage : {},
+    };
+    const directory =
+      index === 0
+        ? join(out, 'receipts')
+        : join(out, 'browser-results', String(index));
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, index === 0 ? 'node.json' : 'coverage-realms.json'),
+      JSON.stringify(receipt),
+    );
+  }
+  return { out, module, bundle };
+}
+
+test('owned dependency copy resolves external members, isolates source mutation and seals copied bytes', async (t) => {
+  let external = '',
+    measured = '';
+  const f = await reportFixture(t, async (out, base) => {
+    const source = join(base, 'dependencies');
+    external = join(base, 'external-package/index.js');
+    await mkdir(dirname(external), { recursive: true });
+    await writeFile(external, 'export const dependency = 1;');
+    await mkdir(join(source, '@scope'), { recursive: true });
+    await symlink(dirname(external), join(source, '@scope/member'));
+    const destination = join(out, 'terrarium/packages/terrarium/node_modules');
+    const copied = await copyCoverageDependencies(source, destination);
+    measured = join(destination, '@scope/member/index.js');
+    assert.equal(copied.files.length, 1);
+    assert.equal(await realpath(measured), measured);
+    await assert.rejects(
+      copyCoverageDependencies(source, destination),
+      /EEXIST/,
+    );
+  });
+  assert.equal((await reportCoverage(f.out)).passed, true);
+  await writeFile(external, 'export const dependency = 2;');
+  assert.equal(
+    await readFile(measured, 'utf8'),
+    'export const dependency = 1;',
+  );
+  assert.equal((await reportCoverage(f.out)).passed, true);
+  await writeFile(measured, 'export const dependency = 3;');
+  await assert.rejects(
+    reportCoverage(f.out),
+    /execution seal bytes or inventory changed/,
+  );
+});
+test('dependency copy rejects cycles before creating an output', async (t) => {
+  const base = await realpath(
+    await mkdtemp(join(tmpdir(), 'u3-dependency-cycle-')),
+  );
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const source = join(base, 'source'),
+    target = join(base, 'copied');
+  await mkdir(source);
+  await symlink(source, join(source, 'cycle'));
+  await assert.rejects(
+    copyCoverageDependencies(source, target),
+    /dependency symlink cycle/,
+  );
+  await assert.rejects(realpath(target), /ENOENT/);
+});
+
+test('report refuses instrumented module-only tampering with original sources and statement maps intact', async (t) => {
+  const f = await reportFixture(t);
+  await writeFile(f.module, 'export const instrumented = 2;');
+  await assert.rejects(
+    reportCoverage(f.out),
+    /execution|seal|instrumented.*changed/i,
+  );
+});
+test('report refuses final browser bundle-only tampering with original candidate intact', async (t) => {
+  const f = await reportFixture(t);
+  await writeFile(f.bundle, 'export const bundled = 2;');
+  await assert.rejects(
+    reportCoverage(f.out),
+    /execution|seal|bundle.*changed/i,
+  );
+});
+test('report refuses measured-copy drift after a successful complete report', async (t) => {
+  const f = await reportFixture(t);
+  const before = await reportCoverage(f.out);
+  assert.equal(
+    before.passed,
+    true,
+    'fixture must reach the full successful report path',
+  );
+  await writeFile(f.module, 'export const instrumented = 2;');
+  await assert.rejects(
+    reportCoverage(f.out),
+    /execution|seal|instrumented.*changed/i,
+  );
+});
+test('normal seal rejects resealing and missing seal or stale execution receipts', async (t) => {
+  const f = await reportFixture(t);
+  assert.equal((await reportCoverage(f.out)).passed, true);
+  await assert.rejects(sealCoverage(f.out), { code: 'EEXIST' });
+  const nodePath = join(f.out, 'receipts/node.json');
+  const receipt = JSON.parse(await readFile(nodePath, 'utf8'));
+  receipt.executionIdentity = 'old-execution';
+  await writeFile(nodePath, JSON.stringify(receipt));
+  await assert.rejects(reportCoverage(f.out), /execution receipt/);
+  await rm(join(f.out, 'execution-seal.json'));
+  await assert.rejects(reportCoverage(f.out), /ENOENT/);
+});
+test('sealed execution rejects additions omissions kind changes and escaping links', async (t) => {
+  for (const mutation of ['extra', 'missing', 'kind', 'link']) {
+    const f = await reportFixture(t);
+    if (mutation === 'extra')
+      await writeFile(join(dirname(f.module), 'extra.ts'), 'extra');
+    else {
+      await rm(f.module);
+      if (mutation === 'kind') await mkdir(f.module);
+      if (mutation === 'link')
+        await symlink(join(f.out, 'inventory.json'), f.module);
+    }
+    await assert.rejects(
+      reportCoverage(f.out),
+      /execution seal|execution escaping symlink/,
+    );
+  }
+});
 
 function fixture() {
   const metadata = FILES.map((path) => {
@@ -164,10 +381,83 @@ test('immutable U1 import preserves original realm names and rejects wrong pack/
       ),
     })),
   };
-  const imported = componentImport(f.inventory, report, 'e'.repeat(64));
+  const imported = componentImport(
+    { ...f.inventory, u1Report: '/record/u1-coverage-v9/coverage-report.json' },
+    report,
+    'e'.repeat(64),
+  );
   assert.equal(imported.kind, 'immutable-component-import');
   assert.equal(imported.originalGeneration, 'u1-coverage-v9');
+  assert.equal(
+    componentImport(
+      {
+        ...f.inventory,
+        u1Report: '/record/u1-coverage-v11/coverage-report.json',
+      },
+      report,
+      'e'.repeat(64),
+    ).originalGeneration,
+    'u1-coverage-v11',
+    'original generation follows the bound report, not a collector constant',
+  );
   assert.deepEqual(imported.originalRealmNames, report.realmNames);
+  const historicalU2Sixteen = structuredClone(report);
+  for (const path of [
+    'runtime/guest-validation.js',
+    'runtime/session-port.js',
+  ]) {
+    historicalU2Sixteen.files.push({ ...report.files[0], path });
+    historicalU2Sixteen.digests.push({ ...report.digests[0], path });
+  }
+  assert.throws(
+    () => componentImport(f.inventory, historicalU2Sixteen, 'e'.repeat(64)),
+    /denominator/,
+    'historical U2 sixteen-file distribution is not historical fourteen-file proof',
+  );
+  const currentTwentyOne = structuredClone(historicalU2Sixteen);
+  for (const name of [
+    'install-catalog',
+    'install-transfer',
+    'install-archive',
+    'install-lifecycle',
+    'install',
+  ]) {
+    const path = `runtime/${name}.js`;
+    currentTwentyOne.files.push({ ...report.files[0], path });
+    currentTwentyOne.digests.push({ ...report.digests[0], path });
+  }
+  assert.equal(currentTwentyOne.files.length, 21);
+  assert.throws(
+    () => componentImport(f.inventory, currentTwentyOne, 'e'.repeat(64)),
+    /denominator/,
+    'current install distribution cannot inherit historical fourteen-file proof',
+  );
+  for (const path of [
+    'runtime/guest-validation.js',
+    'runtime/session-port.js',
+  ]) {
+    const newModule = structuredClone(report);
+    newModule.files[0].path = path;
+    newModule.digests[0].path = path;
+    assert.throws(
+      () => componentImport(f.inventory, newModule, 'e'.repeat(64)),
+      /denominator/,
+      'current U2 modules cannot inherit historical U1 component proof',
+    );
+  }
+  assert.throws(
+    () => componentImport(f.inventory, report, 'e'.repeat(64)),
+    /original report path/,
+  );
+  assert.throws(
+    () =>
+      componentImport(
+        { ...f.inventory, u1Report: 'u1-coverage-v11/coverage-report.json' },
+        report,
+        'e'.repeat(64),
+      ),
+    /original report path/,
+  );
   assert.throws(
     () =>
       componentImport(f.inventory, { ...report, candidateSha256: 'wrong' }, ''),

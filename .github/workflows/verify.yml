@@ -1,0 +1,46 @@
+name: Candidate verification
+on:
+  push:
+    branches: ['codex/verify/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'Marukome0743/formicarium' && startsWith(github.ref, 'refs/heads/codex/verify/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - run: npm ci --ignore-scripts
+      - run: node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/typescript/bin/tsc -p tsconfig.tests.json && node .build/scripts/emit.js
+      - run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
+      - name: Install reviewed candidate inputs
+        env:
+          FORMICARIUM_CI_INPUT_URL: ${{ vars.FORMICARIUM_CI_INPUT_URL }}
+          FORMICARIUM_CI_INPUT_SHA256: ${{ vars.FORMICARIUM_CI_INPUT_SHA256 }}
+        run: python3 scripts/ci/install-inputs.py
+      - name: Verify sequentially
+        run: FORMICARIUM_CI_BUN="$(command -v bun)" node scripts/ci/run.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/ci-results/
+            .artifacts/ci-coverage-fixed24/
+            .artifacts/u1-coverage-v1000001/coverage-report.json
+            .artifacts/u1-coverage-v1000001/browser-results/
+          include-hidden-files: true
+          if-no-files-found: error

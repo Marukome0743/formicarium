@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { FileCoverageData } from 'istanbul-lib-coverage';
@@ -76,9 +85,14 @@ export async function prepareCoverage(output: string) {
   const out = resolve(output),
     workspace = join(out, 'workspace');
   const candidate = await candidateIdentity(process.env.U2_ACTUAL_SITE);
+  // A preparation owns its receipts for life; never adopt an earlier run.
+  await mkdir(dirname(out), { recursive: true });
+  await mkdir(out);
+  const generation = randomUUID();
   await mkdir(workspace, { recursive: true });
   for (const path of [
     'tests/guest-distribution',
+    'tests/shared',
     'scripts/guest-distribution',
     'scripts/playwright-build-config.js',
   ]) {
@@ -116,12 +130,18 @@ export async function prepareCoverage(output: string) {
     join(workspace, 'integration/terrarium/guest-distribution/resolver.d.ts'),
   );
   await cp(join(root, 'package.json'), join(workspace, 'package.json'));
+  const identity = hash(JSON.stringify(digests));
+  const binding = {
+    generation,
+    sourceIdentity: identity,
+    candidateSha256: candidate.sha256,
+  };
   await mkdir(join(out, 'node'), { recursive: true });
-  const preload = `import {writeFileSync} from 'node:fs';\nimport {relative,resolve} from 'node:path';\nprocess.on('exit',(code)=>{const coverage=globalThis.__coverage__;if(coverage&&Object.keys(coverage).length)writeFileSync(${JSON.stringify(join(out, 'node'))}+'/node-'+process.pid+'.json',JSON.stringify({realm:'node-host',testFile:relative(${JSON.stringify(workspace)},resolve(process.argv[1]??'')).replaceAll('\\\\','/'),actualSite:resolve(process.env.U2_ACTUAL_SITE??''),exitCode:code,coverage}));});\n`;
+  const preload = `import {writeFileSync} from 'node:fs';\nimport {relative,resolve} from 'node:path';\nprocess.on('exit',(code)=>{const coverage=globalThis.__coverage__;if(coverage&&Object.keys(coverage).length)writeFileSync(${JSON.stringify(join(out, 'node'))}+'/node-'+process.pid+'.json',JSON.stringify({...${JSON.stringify(binding)},realm:'node-host',testFile:relative(${JSON.stringify(workspace)},resolve(process.argv[1]??'')).replaceAll('\\\\','/'),actualSite:resolve(process.env.U2_ACTUAL_SITE??''),exitCode:code,coverage}));});\n`;
   await writeFile(join(out, 'node-preload.mjs'), preload);
   const specPath = join(workspace, 'tests/guest-distribution/consumer.spec.js');
   const original = await readFile(specPath, 'utf8');
-  const hook = `\ntest.afterEach(async({page},info)=>{const coverage=await page.evaluate(()=>globalThis.__coverage__);if(!coverage)throw Error('missing browser host coverage');await coverageWrite(info.outputPath('coverage-realms.json'),JSON.stringify({realm:'browser-host',project:info.project.name,title:info.title,status:info.status,expectedStatus:info.expectedStatus,actualSite:process.env.U2_ACTUAL_SITE,coverage}));});\n`;
+  const hook = `\ntest.afterEach(async({page},info)=>{const coverage=await page.evaluate(()=>globalThis.__coverage__);if(!coverage)throw Error('missing browser host coverage');await coverageWrite(info.outputPath('coverage-realms.json'),JSON.stringify({...${JSON.stringify(binding)},realm:'browser-host',project:info.project.name,title:info.title,status:info.status,expectedStatus:info.expectedStatus,actualSite:process.env.U2_ACTUAL_SITE,coverage}));});\n`;
   await writeFile(
     specPath,
     `import {writeFile as coverageWrite} from 'node:fs/promises';\n${original.replace('test.beforeEach', `${hook}\ntest.beforeEach`)}`,
@@ -135,9 +155,9 @@ export async function prepareCoverage(output: string) {
     configPath,
     compiledTestConfig(config, join(out, 'browser-results')),
   );
-  const identity = hash(JSON.stringify(digests));
   await save(join(out, 'inventory.json'), {
     version: 1,
+    generation,
     files: FILES,
     metadata,
     digests,
@@ -218,6 +238,23 @@ export function mergeMeasurements(
   rows: Measurement[],
 ) {
   validateInventory(inventory);
+  if (
+    !inventory.generation ||
+    !inventory.sourceIdentity ||
+    !inventory.candidate?.sha256
+  )
+    throw new Error('coverage preparation identity missing');
+  if (
+    rows.some(
+      (row) =>
+        row.generation !== inventory.generation ||
+        row.sourceIdentity !== inventory.sourceIdentity ||
+        row.candidateSha256 !== inventory.candidate?.sha256,
+    )
+  )
+    throw new Error(
+      'coverage measurement generation/source/candidate identity differs',
+    );
   for (const testFile of NODE_TESTS) {
     const matches = rows.filter(
       (row) => row.realm === 'node-host' && row.testFile === testFile,
@@ -320,6 +357,7 @@ export async function reportCoverage(output: string) {
   const result = mergeMeasurements(inventory, rows);
   await save(join(out, 'coverage-final.json'), result.map.toJSON());
   await save(join(out, 'report.json'), {
+    generation: inventory.generation,
     sourceIdentity: inventory.sourceIdentity,
     digests: inventory.digests,
     candidate: inventory.candidate,
@@ -342,13 +380,16 @@ export async function reportCoverage(output: string) {
   };
 }
 
-function selfTest() {
+async function selfTest() {
   const instrumenter = createInstrumenter({ esModules: true });
   const metadata = FILES.map((path) => {
     instrumenter.instrumentSync('export function unused(){return 1;}\n', path);
     return instrumenter.lastFileCoverage();
   });
   const inventory = {
+    generation: 'regression-generation-current',
+    sourceIdentity: '2'.repeat(64),
+    candidate: { sha256: '3'.repeat(64) },
     files: FILES,
     metadata,
     digests: metadata.map((file) => ({
@@ -359,6 +400,9 @@ function selfTest() {
     })),
   };
   const rows: Measurement[] = NODE_TESTS.map((testFile) => ({
+    generation: inventory.generation,
+    sourceIdentity: inventory.sourceIdentity,
+    candidateSha256: inventory.candidate.sha256,
     realm: 'node-host',
     testFile,
     exitCode: 0,
@@ -367,6 +411,9 @@ function selfTest() {
   for (const project of PROJECTS)
     for (const title of TITLES)
       rows.push({
+        generation: inventory.generation,
+        sourceIdentity: inventory.sourceIdentity,
+        candidateSha256: inventory.candidate.sha256,
         realm: 'browser-host',
         project,
         title,
@@ -404,6 +451,62 @@ function selfTest() {
   const nonzero = structuredClone(inventory);
   nonzero.metadata[0]!.s[Object.keys(nonzero.metadata[0]!.s)[0]!] = 1;
   assert.throws(() => mergeMeasurements(nonzero, rows), /only zero counters/);
+  // A matching statement map alone cannot certify a different preparation.
+  for (const field of [
+    'generation',
+    'sourceIdentity',
+    'candidateSha256',
+  ] as const) {
+    for (const realmIndex of [0, NODE_TESTS.length]) {
+      const stale = structuredClone(rows);
+      stale[realmIndex]![field] = 'stale-identity';
+      assert.throws(
+        () => mergeMeasurements(inventory, stale),
+        /identity|generation|candidate|binding/,
+        `stale ${field} in ${stale[realmIndex]!.realm} must be refused`,
+      );
+      const missing = structuredClone(rows);
+      delete missing[realmIndex]![field];
+      assert.throws(
+        () => mergeMeasurements(inventory, missing),
+        /identity|generation|candidate|binding/,
+        `missing ${field} must not adopt old receipts`,
+      );
+    }
+  }
+  const directory = await mkdtemp(join(tmpdir(), 'u2-coverage-regression-'));
+  const priorSite = process.env.U2_ACTUAL_SITE;
+  try {
+    const site = join(directory, 'site');
+    await mkdir(join(site, 'dist'), { recursive: true });
+    await save(join(site, 'tools.json'), { aube: { default: 'main' } });
+    await save(join(site, 'dist/builds.json'), { builds: {} });
+    process.env.U2_ACTUAL_SITE = site;
+    const used = join(directory, 'measurement');
+    await prepareCoverage(used);
+    assert.deepEqual(
+      await readFile(join(used, 'workspace/tests/shared/assertions.js')),
+      await readFile(join(root, 'tests/shared/assertions.js')),
+      'instrumented tests retain their compiled shared dependency',
+    );
+    await save(join(used, 'node/node-1.json'), rows[0]);
+    const originalInventory = await readFile(join(used, 'inventory.json'));
+    await writeFile(join(site, 'changed-candidate'), 'new bytes');
+    await assert.rejects(
+      prepareCoverage(used),
+      /exist|used|fresh|prepar/,
+      're-preparing after candidate change must not retain old receipts',
+    );
+    assert.deepEqual(
+      await readFile(join(used, 'inventory.json')),
+      originalInventory,
+    );
+    await assert.rejects(reportCoverage(used), /candidate.*changed|identity/);
+  } finally {
+    if (priorSite === undefined) delete process.env.U2_ACTUAL_SITE;
+    else process.env.U2_ACTUAL_SITE = priorSite;
+    await rm(directory, { recursive: true, force: true });
+  }
   console.log(
     'coverage self-test: 3 never-imported files retained at 0%; missing Node/browser case and skipped case refused',
   );
@@ -416,7 +519,7 @@ if (
   const [command, output, ...extra] = process.argv.slice(2);
   if (extra.length)
     throw new Error('usage: coverage.js prepare|report <output> | self-test');
-  if (command === 'self-test') selfTest();
+  if (command === 'self-test') await selfTest();
   else if (command === 'prepare' && output)
     console.log(JSON.stringify(await prepareCoverage(output)));
   else if (command === 'report' && output)

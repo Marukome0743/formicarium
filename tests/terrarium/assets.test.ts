@@ -10,6 +10,7 @@ import {
   sha256,
   verifyInstalledPackage,
 } from '../../scripts/terrarium/evidence.js';
+import { validateBaselineCommit } from '../../scripts/terrarium/prepare.js';
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'u3-assets-'));
@@ -61,7 +62,7 @@ test('candidate identity contains every file and changes for same-length replace
   );
   const after = await directoryIdentity(f.packageRoot);
   assert.notEqual(before.sha256, after.sha256);
-  assert.equal(before.files.length, 23);
+  assert.equal(before.files.length, PACKAGE_FILES.length);
 });
 test('candidate symlinks cannot hide bytes outside the supply root', async (t) => {
   const f = await fixture(t);
@@ -75,4 +76,20 @@ test('missing installed worker fails rather than producing success evidence', as
   const f = await fixture(t);
   await rm(join(f.packageRoot, 'runtime/web/package-worker.js'));
   await assert.rejects(verifyInstalledPackage(f), { code: 'ENOENT' });
+});
+
+test('integration baseline preserves the observed current repository revision', () => {
+  const observed = '0aa94fde1e33230efb96e8763f0fa811ce1cdd80';
+  assert.equal(validateBaselineCommit(observed), observed);
+});
+
+test('integration baseline rejects missing, abbreviated and malformed provenance', () => {
+  for (const value of [
+    undefined,
+    '',
+    '0aa94fde',
+    'g'.repeat(40),
+    'a'.repeat(41),
+  ])
+    assert.throws(() => validateBaselineCommit(value), /observed full SHA/);
 });

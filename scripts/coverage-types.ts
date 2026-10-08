@@ -25,6 +25,7 @@ export interface CoverageInventory {
   exclusions?: Record<string, string>;
 }
 export interface Measurement {
+  executionIdentity?: string;
   generation?: string;
   sourceIdentity?: string;
   candidateSha256?: string;

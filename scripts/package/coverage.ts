@@ -35,12 +35,16 @@ export function createRealm(layout: CounterRow[], name: string): Realm {
   return { name, buffer: new SharedArrayBuffer(size * 4) };
 }
 export function bridgeSource(layout: CounterRow[]) {
+  // Coverage needs zero/nonzero statements, not unbounded execution frequency.
+  // Saturate raw signed Int32 counters before storage so hot SHA loops cannot
+  // wrap into negative/zero counts. Never repair previously collected evidence.
+  // A saturated count is a lower bound, not an exact execution frequency.
   return `globalThis.__coverage__=new Proxy({}, {set(object,key,file){
 const row=${JSON.stringify(layout)}.find(row=>row.path===key);
 if(!row)throw Error('unexpected coverage file');
 if(JSON.stringify(Object.keys(file.s))!==JSON.stringify(row.keys))throw Error('coverage statement map mismatch');
 Atomics.store(globalThis.__coverageCounters,row.registeredOffset,1);
-for(let i=0;i<row.keys.length;i++)Object.defineProperty(file.s,row.keys[i],{enumerable:true,get(){return Atomics.load(globalThis.__coverageCounters,row.offset+i)},set(value){Atomics.store(globalThis.__coverageCounters,row.offset+i,value)}});
+for(let i=0;i<row.keys.length;i++)Object.defineProperty(file.s,row.keys[i],{enumerable:true,get(){return Atomics.load(globalThis.__coverageCounters,row.offset+i)},set(value){if(!Number.isSafeInteger(value)||value<0)throw Error('coverage counter requires nonnegative safe integer');Atomics.store(globalThis.__coverageCounters,row.offset+i,Math.min(value,2147483647))}});
 object[key]=file;return true;}}); Atomics.store(globalThis.__coverageCounters,0,1);`;
 }
 export function mergeRealms(
@@ -70,6 +74,9 @@ export function mergeRealms(
   for (const file of metadata) map.addFileCoverage(structuredClone(file));
   for (const realm of realms) {
     const counters = new Int32Array(realm.buffer);
+    for (let index = 0; index < counters.length; index++)
+      if (Atomics.load(counters, index) < 0)
+        throw new Error(`negative coverage counter: ${realm.name}:${index}`);
     for (const file of metadata) {
       const row = layout.find((item) => item.path === file.path)!;
       const measured = structuredClone(file);
@@ -155,6 +162,12 @@ for(const data of pending)if(data.type!=='coverage-bootstrap')self.dispatchEvent
   return { metadata, layout, digests, bridge };
 }
 
+export async function copySharedTestHelpers(root: string, out: string) {
+  await cp(resolve(root, 'tests/shared'), resolve(out, 'tests/shared'), {
+    recursive: true,
+  });
+}
+
 export async function prepareCoverage({
   source,
   out,
@@ -169,6 +182,7 @@ export async function prepareCoverage({
   await cp(resolve(root, 'tests/package'), resolve(out, 'tests/package'), {
     recursive: true,
   });
+  await copySharedTestHelpers(root, out);
   await cp(resolve(root, 'scripts/package'), resolve(out, 'scripts/package'), {
     recursive: true,
   });
@@ -240,10 +254,12 @@ export async function reportCoverage({
   out,
   browserResults,
   candidatePath,
+  session,
 }: {
   out: string;
   browserResults: string;
   candidatePath: string;
+  session?: { nodeWorkers: number; browserCases: Record<string, number> };
 }) {
   const { metadata, layout, digests } = JSON.parse(
     await readFile(resolve(out, 'coverage-metadata.json'), 'utf8'),
@@ -297,6 +313,30 @@ export async function reportCoverage({
   ];
   if (nodeRows.length !== inventory.node.workers + inventory.node.host)
     throw new Error('Node planned Worker realms were not all retained');
+  if (session) {
+    const rows = JSON.parse(
+      await readFile(resolve(out, 'coverage-session-node.json'), 'utf8'),
+    ) as { name: string; counts: number[] }[];
+    if (rows.length !== session.nodeWorkers + 1)
+      throw Error('U2 planned Node Worker realms were not all retained');
+    for (const row of rows)
+      realms.push({
+        name: `session:${row.name}`,
+        buffer: Int32Array.from(row.counts).buffer,
+      });
+    expected.push(
+      'session:node-host',
+      ...Array.from(
+        { length: session.nodeWorkers },
+        (_, index) => `session:node-worker-${index + 1}`,
+      ),
+    );
+    for (const [title, workers] of Object.entries(session.browserCases)) {
+      if (Object.hasOwn(inventory.browserCases, title))
+        throw Error('U2 coverage case duplicates package case');
+      inventory.browserCases[title] = workers;
+    }
+  }
   const files: string[] = [];
   async function scan(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {

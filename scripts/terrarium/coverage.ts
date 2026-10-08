@@ -2,14 +2,15 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   cp,
+  lstat,
   mkdir,
   readdir,
   readFile,
-  symlink,
+  realpath,
   writeFile,
 } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
-import { join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { FileCoverageData } from 'istanbul-lib-coverage';
 import coverageLibrary from 'istanbul-lib-coverage';
@@ -19,7 +20,6 @@ import type {
   CoverageInventory,
   Measurement,
 } from '../coverage-types.js';
-import { FIRST_PARTY_JS } from '../package/stage-package.js';
 import { directoryIdentity, sha256 } from './evidence.js';
 
 const { createCoverageMap } = coverageLibrary;
@@ -29,6 +29,24 @@ import instrumentLibrary from 'istanbul-lib-instrument';
 const { createInstrumenter } = instrumentLibrary;
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+// Historical Terrarium component: these fourteen files belong to the original
+// U1 proof, never to the current twenty-one-file distribution denominator.
+export const HISTORICAL_U1_JS = Object.freeze([
+  'runtime/contracts.js',
+  'runtime/public.js',
+  'runtime/errors.js',
+  'runtime/validation.js',
+  'runtime/state.js',
+  'runtime/lifecycle.js',
+  'runtime/protocol.js',
+  'runtime/worker-execution.js',
+  'runtime/core.js',
+  'runtime/guest-io.js',
+  'runtime/node/api.js',
+  'runtime/node/package-worker.js',
+  'runtime/web/api.js',
+  'runtime/web/package-worker.js',
+]);
 export const U2_FILES = ['manifest', 'fixtures', 'resolver'].map(
   (name) => `integration/terrarium/guest-distribution/${name}.js`,
 );
@@ -43,7 +61,7 @@ export const U3_FILES = [
   .map((name) => `terrarium/packages/terrarium/src/${name}.ts`)
   .concat('terrarium/web/terminal.mjs');
 export const FILES = Object.freeze([
-  ...FIRST_PARTY_JS,
+  ...HISTORICAL_U1_JS,
   ...U2_FILES,
   ...U3_FILES,
 ]);
@@ -98,6 +116,88 @@ function binding(inventory: CoverageInventory) {
     sourceIdentity: inventory.sourceIdentity,
     candidateSha256: inventory.candidate?.sha256,
   };
+}
+
+// Self-contained verifier is part of the sealed bytes; it never embeds its own hash.
+export const executionVerifierSource = `import {lstat,readdir,readFile,readlink,realpath} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {join,resolve,sep} from 'node:path';
+const hash=x=>createHash('sha256').update(x).digest('hex');
+export async function executionInventory(out){
+ const rows=[]; const active=new Set();
+ async function walk(actual,path,boundary){
+  const stat=await lstat(actual);
+  if(stat.isSymbolicLink()){
+   const target=await readlink(actual),canonical=await realpath(actual);
+   if(path==='terrarium/packages/terrarium/node_modules'){
+    rows.push({path,kind:'dependency-link',target,canonical});
+    await walk(canonical,path+'/@dependency',canonical);return;
+   }
+   if(!canonical.startsWith(boundary+sep))throw Error('execution escaping symlink: '+path);
+   rows.push({path,kind:'symlink',target});
+   await walk(canonical,path+'/@target',boundary);return;
+  }
+  if(stat.isDirectory()){
+   const canonical=await realpath(actual);if(active.has(canonical))throw Error('execution symlink cycle');
+   active.add(canonical);rows.push({path,kind:'directory'});
+   for(const name of (await readdir(actual)).sort())await walk(join(actual,name),path+'/'+name,boundary);
+   active.delete(canonical);
+  }else if(stat.isFile()){const bytes=await readFile(actual);rows.push({path,kind:'file',size:bytes.length,sha256:hash(bytes)});}
+  else throw Error('execution special file');
+ }
+ for(const path of ['site','terrarium','node-preload.mjs','execution-verifier.mjs'])await walk(join(out,path),path,resolve(out));
+ return rows.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+}
+export async function verifyExecution(out){
+ const seal=JSON.parse(await readFile(join(out,'execution-seal.json'),'utf8'));
+ const inventory=JSON.parse(await readFile(join(out,'inventory.json'),'utf8'));
+ const rows=await executionInventory(out);
+ const identity=hash(JSON.stringify({generation:inventory.generation,sourceIdentity:inventory.sourceIdentity,candidateSha256:inventory.candidate.sha256,rows}));
+ if(identity!==seal.executionIdentity||JSON.stringify(rows)!==JSON.stringify(seal.rows))throw Error('execution seal bytes or inventory changed');
+ return identity;
+}
+`;
+async function executionHelper(out: string) {
+  return import(
+    pathToFileURL(join(resolve(out), 'execution-verifier.mjs')).href
+  ) as Promise<{
+    executionInventory(out: string): Promise<unknown[]>;
+    verifyExecution(out: string): Promise<string>;
+  }>;
+}
+export async function sealCoverage(out: string) {
+  out = resolve(out);
+  const inventory = await json(join(out, 'inventory.json'));
+  validateInventory(inventory);
+  const helperBytes = await readFile(
+    join(out, 'execution-verifier.mjs'),
+    'utf8',
+  );
+  if (helperBytes !== executionVerifierSource)
+    throw new Error('execution verifier changed');
+  const rows = await (await executionHelper(out)).executionInventory(out);
+  const executionIdentity = sha256(
+    JSON.stringify({ ...binding(inventory), rows }),
+  );
+  await writeFile(
+    join(out, 'execution-seal.json'),
+    JSON.stringify({
+      version: 1,
+      ...binding(inventory),
+      executionIdentity,
+      rows,
+    }),
+    { flag: 'wx' },
+  );
+  return { executionIdentity };
+}
+export async function verifyExecution(out: string) {
+  if (
+    (await readFile(join(out, 'execution-verifier.mjs'), 'utf8')) !==
+    executionVerifierSource
+  )
+    throw new Error('execution verifier changed');
+  return (await executionHelper(out)).verifyExecution(resolve(out));
 }
 
 function validateInventory(inventory: CoverageInventory) {
@@ -159,13 +259,18 @@ export function componentImport(
   )
     throw new Error('U1 planned realm inventory differs');
   if (
-    report.files.length !== FIRST_PARTY_JS.length ||
+    report.files.length !== HISTORICAL_U1_JS.length ||
     new Set(report.files.map((file) => file.path)).size !==
-      FIRST_PARTY_JS.length
+      HISTORICAL_U1_JS.length ||
+    report.files.some((file) => !HISTORICAL_U1_JS.includes(file.path)) ||
+    report.digests.length !== HISTORICAL_U1_JS.length ||
+    new Set(report.digests.map((file) => file.path)).size !==
+      HISTORICAL_U1_JS.length ||
+    report.digests.some((file) => !HISTORICAL_U1_JS.includes(file.path))
   )
     throw new Error('U1 denominator differs');
   const coverage: Record<string, FileCoverageData> = {};
-  for (const path of FIRST_PARTY_JS) {
+  for (const path of HISTORICAL_U1_JS) {
     const file = structuredClone(
       inventory.metadata.find((row) => row.path === path)!,
     );
@@ -187,10 +292,19 @@ export function componentImport(
     }
     coverage[path] = file;
   }
+  const originalReport = inventory.u1Report;
+  if (
+    typeof originalReport !== 'string' ||
+    !isAbsolute(originalReport) ||
+    basename(originalReport) !== 'coverage-report.json' ||
+    !/^u1-coverage-v[0-9]+$/.test(basename(dirname(originalReport)))
+  )
+    throw new Error('U1 component original report path is missing or invalid');
   return {
     kind: 'immutable-component-import',
     originalReportSha256: reportSha256,
-    originalGeneration: 'u1-coverage-v9',
+    originalReportPath: originalReport,
+    originalGeneration: basename(dirname(originalReport)),
     originalSourceIdentity: sha256(JSON.stringify(report.digests)),
     originalTarballSha256: report.candidateSha256,
     originalRealmNames: report.realmNames,
@@ -269,6 +383,67 @@ export function mergeMeasurements(
   };
 }
 
+/** Resolve authorized dependency links into owned bytes without weakening execution sealing. */
+export async function copyCoverageDependencies(
+  source: string,
+  destination: string,
+) {
+  const sourceRoot = await realpath(source),
+    target = resolve(destination);
+  if (target === sourceRoot || target.startsWith(`${sourceRoot}${sep}`))
+    throw new Error('dependency copy destination overlaps source');
+  async function inventory() {
+    const rows: { path: string; size: number; sha256: string }[] = [];
+    const active = new Set<string>();
+    async function walk(path: string, relative: string): Promise<void> {
+      const canonical = await realpath(path),
+        stat = await lstat(canonical);
+      if (stat.isDirectory()) {
+        if (active.has(canonical)) throw new Error('dependency symlink cycle');
+        active.add(canonical);
+        for (const name of (await readdir(canonical)).sort())
+          await walk(
+            join(canonical, name),
+            relative ? `${relative}/${name}` : name,
+          );
+        active.delete(canonical);
+      } else if (stat.isFile()) {
+        const bytes = await readFile(canonical);
+        rows.push({
+          path: relative,
+          size: bytes.length,
+          sha256: sha256(bytes),
+        });
+      } else throw new Error('dependency special file refused');
+    }
+    await walk(sourceRoot, '');
+    return rows.sort((a, b) => a.path.localeCompare(b.path));
+  }
+  const before = await inventory();
+  await mkdir(target);
+  for (const name of (await readdir(sourceRoot)).sort())
+    await cp(join(sourceRoot, name), join(target, name), {
+      recursive: true,
+      dereference: true,
+      errorOnExist: true,
+      force: false,
+    });
+  const after = await inventory(),
+    copied = await directoryIdentity(target);
+  if (
+    JSON.stringify(before) !== JSON.stringify(after) ||
+    JSON.stringify(before) !== JSON.stringify(copied.files)
+  )
+    throw new Error('dependency copy identity drift');
+  return {
+    sourceRoot,
+    files: copied.files,
+    sha256: copied.sha256,
+    scope:
+      'owned dereferenced dependency snapshot; execution seal remains strict',
+  };
+}
+
 export async function prepareCoverage({
   out,
   site,
@@ -303,7 +478,7 @@ export async function prepareCoverage({
   await cp(join(terrarium, 'scripts'), join(out, 'terrarium/scripts'), {
     recursive: true,
   });
-  await symlink(
+  await copyCoverageDependencies(
     join(terrarium, 'packages/terrarium/node_modules'),
     join(workspace, 'node_modules'),
   );
@@ -378,6 +553,7 @@ export async function prepareCoverage({
   );
   await save(join(out, 'inventory.json'), inventory);
   await mkdir(join(out, 'receipts'));
+  await writeFile(join(out, 'execution-verifier.mjs'), executionVerifierSource);
   const identity = JSON.stringify(binding(inventory));
   await writeFile(
     join(out, 'node-preload.mjs'),
@@ -399,7 +575,7 @@ export async function prepareCoverage({
       source = await readFile(filename, 'utf8');
     await writeFile(
       filename,
-      `import {writeFile as u3CoverageWrite} from 'node:fs/promises';\n${source}\ntest.afterEach(async({page},info)=>{const coverage={};for(const frame of page.frames()){const measured=await frame.evaluate(()=>globalThis.__coverage__??{});for(const [path,file]of Object.entries(measured)){if(coverage[path])throw Error('duplicate measured module realm; separate merging required');coverage[path]=file;}}await u3CoverageWrite(info.outputPath('coverage-realms.json'),JSON.stringify({...${identity},realm:'browser-host',project:info.project.name,title:info.title,status:info.status,expectedStatus:info.expectedStatus,coverage}));});\n`,
+      `import {writeFile as u3CoverageWrite} from 'node:fs/promises';\nimport {verifyExecution as u4Verify} from ${JSON.stringify(join(out, 'execution-verifier.mjs'))};\n${source}\ntest.beforeAll(async()=>{await u4Verify(${JSON.stringify(out)});});\ntest.afterEach(async({page},info)=>{const executionIdentity=await u4Verify(${JSON.stringify(out)});const coverage={};for(const frame of page.frames()){const measured=await frame.evaluate(()=>globalThis.__coverage__??{});for(const [path,file]of Object.entries(measured)){if(coverage[path])throw Error('duplicate measured module realm; separate merging required');coverage[path]=file;}}await u3CoverageWrite(info.outputPath('coverage-realms.json'),JSON.stringify({...${identity},executionIdentity,realm:'browser-host',project:info.project.name,title:info.title,status:info.status,expectedStatus:info.expectedStatus,coverage}));});\n`,
     );
   }
   const config = await readFile(
@@ -428,7 +604,7 @@ export async function prepareCoverage({
 }
 
 export function nodePreloadSource(inventory: CoverageInventory, out: string) {
-  return `import {afterAll} from 'bun:test';\nimport {writeFileSync} from 'node:fs';\nafterAll(()=>{if(!process.env.U3_NODE_ATTEMPT)throw Error('main collector attempt missing');writeFileSync(${JSON.stringify(join(out, 'node-raw.json'))},JSON.stringify({...${JSON.stringify(binding(inventory))},attempt:process.env.U3_NODE_ATTEMPT,coverage:globalThis.__coverage__??{}}));});\n`;
+  return `import {afterAll} from 'bun:test';\nimport {writeFileSync} from 'node:fs';\nimport {verifyExecution} from ${JSON.stringify(join(out, 'execution-verifier.mjs'))};\nawait verifyExecution(${JSON.stringify(out)});\nafterAll(async()=>{const executionIdentity=await verifyExecution(${JSON.stringify(out)});if(!process.env.U3_NODE_ATTEMPT)throw Error('main collector attempt missing');writeFileSync(${JSON.stringify(join(out, 'node-raw.json'))},JSON.stringify({...${JSON.stringify(binding(inventory))},executionIdentity,attempt:process.env.U3_NODE_ATTEMPT,coverage:globalThis.__coverage__??{}}));});\n`;
 }
 export function finalizeNodeMeasurement(
   inventory: CoverageInventory,
@@ -448,6 +624,7 @@ export function finalizeNodeMeasurement(
     throw new Error('observed process exit missing');
   return {
     ...binding(inventory),
+    executionIdentity: raw.executionIdentity,
     realm: 'node-host',
     status: exitCode === 0 ? 'passed' : 'failed',
     attempt,
@@ -460,11 +637,7 @@ export async function collectNodeMeasurement(out: string, executable: string) {
   const inventory = await json(join(out, 'inventory.json'));
   validateInventory(inventory);
   const attempt = randomUUID();
-  // Refresh the hook for this generation; only a new observed run can finalize it.
-  await writeFile(
-    join(out, 'node-preload.mjs'),
-    nodePreloadSource(inventory, out),
-  );
+  const executionIdentity = await verifyExecution(out);
   const workspace = join(out, 'terrarium/packages/terrarium');
   const args = [
     'test',
@@ -489,6 +662,11 @@ export async function collectNodeMeasurement(out: string, executable: string) {
     throw new Error('fresh raw hook missing');
   }
   const receipt = finalizeNodeMeasurement(inventory, raw, attempt, exitCode);
+  if (
+    (await verifyExecution(out)) !== executionIdentity ||
+    receipt.executionIdentity !== executionIdentity
+  )
+    throw new Error('execution receipt differs');
   await save(join(out, 'receipts/node.json'), {
     ...receipt,
     command: [executable, ...args],
@@ -513,6 +691,7 @@ async function receipts(directory: string): Promise<Measurement[]> {
 }
 export async function reportCoverage(out: string) {
   out = resolve(out);
+  const executionIdentity = await verifyExecution(out);
   const inventory = await json(join(out, 'inventory.json'));
   validateInventory(inventory);
   if (
@@ -535,10 +714,14 @@ export async function reportCoverage(out: string) {
     ...(await receipts(join(out, 'receipts'))),
     ...(await receipts(join(out, 'browser-results'))),
   ];
+  if (rows.some((row) => row.executionIdentity !== executionIdentity))
+    throw new Error('execution receipt missing or stale');
   const result = mergeMeasurements(inventory, rows, component);
+  await verifyExecution(out);
   await save(join(out, 'coverage-final.json'), result.map.toJSON());
   await save(join(out, 'report.json'), {
     ...binding(inventory),
+    executionIdentity,
     lines: result.lines,
     files: result.files,
     passed: result.passed,
@@ -562,6 +745,8 @@ if (
   const [command, input] = process.argv.slice(2);
   if (command === 'prepare' && input)
     console.log(JSON.stringify(await prepareCoverage(await json(input))));
+  else if (command === 'seal' && input)
+    console.log(JSON.stringify(await sealCoverage(input)));
   else if (command === 'node' && input && process.argv[4]) {
     const { coverage, ...receipt } = await collectNodeMeasurement(
       input,
@@ -573,6 +758,6 @@ if (
     console.log(JSON.stringify({ lines, passed }));
   } else
     throw new Error(
-      'usage: coverage.js prepare <input.json> | node <fresh-output-dir> <absolute-Bun> | report <fresh-output-dir>',
+      'usage: coverage.js prepare <input.json> | seal <fresh-output-dir> | node <fresh-output-dir> <absolute-Bun> | report <fresh-output-dir>',
     );
 }

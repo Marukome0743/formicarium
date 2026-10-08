@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { errorCode, errorText, isRecord } from '../../runtime/contracts.js';
 import {
   ERROR_CODES,
   ExecutionError,
@@ -54,4 +55,70 @@ test('validation and safe causes contain fixed explanations', () => {
     JSON.stringify(safeCause('secret env value')).includes('secret'),
     false,
   );
+});
+
+test('error classification preserves Node errno and public execution codes', () => {
+  assert.equal(
+    errorCode(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+    'ENOENT',
+  );
+  assert.equal(errorCode(failure('ASSET_LOAD')), 'ASSET_LOAD');
+});
+test('unknown primitive failures do not invent an error code', () => {
+  for (const value of [null, undefined, 'ENOENT', 404, false])
+    assert.equal(errorCode(value), undefined);
+});
+test('malformed diagnostic code fields cannot become string classifications', () => {
+  for (const value of [{}, { code: 404 }, { code: null }, { code: ['ENOENT'] }])
+    assert.equal(errorCode(value), undefined);
+});
+test('a throwing diagnostic accessor is propagated instead of hiding its failure', () => {
+  const cause = new Error('diagnostic accessor failed');
+  const value = {
+    get code() {
+      throw cause;
+    },
+  };
+  assert.throws(
+    () => errorCode(value),
+    (error) => error === cause,
+  );
+});
+test('error text uses an Error message without appending stack or cause', () => {
+  const error = new Error('asset unavailable', {
+    cause: new Error('private cause'),
+  });
+  assert.equal(errorText(error), 'asset unavailable');
+});
+test('non Error rejections preserve their explicit textual diagnostics', () => {
+  assert.equal(errorText(null), 'null');
+  assert.equal(errorText(undefined), 'undefined');
+  assert.equal(errorText(404), '404');
+  assert.equal(errorText('cancelled'), 'cancelled');
+});
+test('failed diagnostic conversion is propagated without fabricating fallback text', () => {
+  const cause = new Error('conversion failed');
+  const value = {
+    toString() {
+      throw cause;
+    },
+  };
+  assert.throws(
+    () => errorText(value),
+    (error) => error === cause,
+  );
+});
+test('record boundary accepts object envelopes but excludes arrays and primitives', () => {
+  assert.equal(isRecord({ type: 'run' }), true);
+  assert.equal(isRecord(Object.create(null)), true);
+  for (const value of [
+    null,
+    undefined,
+    [],
+    [{ type: 'run' }],
+    'run',
+    1,
+    () => {},
+  ])
+    assert.equal(isRecord(value), false);
 });

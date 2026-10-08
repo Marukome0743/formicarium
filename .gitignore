@@ -9,10 +9,76 @@
 /integration/**/*.js
 /tests/**/*.js
 **/*.js.map
+
+# U2 generated JavaScript retained as source review evidence (exact paths only).
+!/runtime/guest-validation.js
+!/runtime/lifecycle.js
+!/runtime/public.js
+!/runtime/session-port.js
+!/runtime/state.js
+!/scripts/migration-session/ci-core.js
+!/scripts/migration-session/ci-inputs.js
+!/scripts/migration-session/ci.js
+!/scripts/migration-session/completion.js
+!/scripts/migration-session/coverage.js
+!/scripts/migration-session/stage.js
+!/scripts/package/coverage.js
+!/scripts/package/stage-package.js
+!/scripts/release/inventory.js
+!/scripts/release/publication-cli.js
+!/scripts/release/publication.js
+!/scripts/terrarium/coverage.js
+!/tests/migration-session/ci.test.js
+!/tests/migration-session/completion.test.js
+!/tests/migration-session/consumer-input.js
+!/tests/migration-session/consumer.spec.js
+!/tests/migration-session/consumer.test.js
+!/tests/migration-session/fixture.test.js
+!/tests/migration-session/fixtures.js
+!/tests/migration-session/guest-validation.test.js
+!/tests/migration-session/playwright.config.js
+!/tests/migration-session/public.test.js
+!/tests/migration-session/reservation.test.js
+!/tests/migration-session/types-invalid.js
+!/tests/migration-session/types-valid.js
+!/tests/package/coverage.test.js
+!/tests/package/lifecycle.test.js
+!/tests/package/pack.test.js
+!/tests/package/public.test.js
+!/tests/release/publication-alignment-fixture.js
+!/tests/terrarium/coverage.test.js
+!/tests/terrarium/current-candidate.test.js
+!/tests/tooling/publication-alignment.test.js
+!/tests/tooling/publication-version.test.js
+
+# U3 generated JavaScript retained as source review evidence (exact paths only).
+!/runtime/install-archive.js
+!/runtime/install-catalog.js
+!/runtime/install-lifecycle.js
+!/runtime/install-transfer.js
+!/runtime/install.js
+!/scripts/migration-install/ci-inputs.js
+!/scripts/migration-install/ci.js
+!/scripts/migration-install/completion.js
+!/scripts/migration-install/coverage.js
+!/scripts/migration-install/measure.js
+!/scripts/migration-install/stage.js
+!/tests/migration-install/acceptance.test.js
+!/tests/migration-install/archive.test.js
+!/tests/migration-install/catalog.test.js
+!/tests/migration-install/consumer.spec.js
+!/tests/migration-install/consumer.test.js
+!/tests/migration-install/hash-regression.spec.js
+!/tests/migration-install/hash-regression.test.js
+!/tests/migration-install/lifecycle.test.js
+!/tests/migration-install/playwright.config.js
+!/tests/migration-install/public.test.js
+!/tests/migration-install/runner-ready.test.js
+!/tests/migration-install/transfer.test.js
+!/tests/migration-install/types-valid.js
 /test-results/
 /playwright-report/
 
-# BEGIN AI-DLC:gitignore
 # Logs
 logs
 *.log
@@ -38,21 +104,12 @@ dist-ssr
 *.sln
 *.sw?
 
-# AI-DLC — the committed-vs-ignored split (workspace layout, re-rooted under aidlc/).
-# Rule of thumb (vision §5.1): per-user session CURSORS and machine-local
-# runtime/derived state are ignored; everything that is the shared work —
-# method, registry, state, AUDIT (per-clone shards), artifacts — is committed.
-#
-# Per-user session cursors — ignored (two teammates legitimately point at
-# different spaces/intents at once; committing them would turn per-user
-# navigation into shared state and cause conflicts on intent creation and cursor switches).
+# BEGIN AI-DLC:gitignore
+# AI-DLC: local working files
 aidlc/active-space
 aidlc/spaces/*/intents/active-intent
-#
-# Machine-local runtime / derived — ignored (regenerated per machine).
-# The clone-id token names this clone's audit shard; it MUST stay machine-local
-# (gitignored) or every clone from a commit would share a shard and git-conflict.
 aidlc/.aidlc-clone-id
+aidlc.settings.local.json
 aidlc/.aidlc-unit-scope.json
 aidlc/.aidlc-unit-parked
 aidlc/.aidlc-claim-generations.json
@@ -60,42 +117,18 @@ aidlc/.aidlc-unit-participant
 aidlc/.aidlc-claim-registry.json
 aidlc/.aidlc-unit-releases/
 aidlc/.aidlc-unit-merges/
-# Atomic active-space create staging (normally unlinked immediately).
 aidlc/.aidlc-active-space-*.tmp
-# Per-conversation session→intent map (resume rebind, P8): per-user runtime
-# state keyed by Claude Code session_id, never shared truth.
+aidlc/active-memory/
 aidlc/.aidlc-sessions/
 aidlc/spaces/*/intents/.aidlc-*
-# Framework state at any depth, including the bare space intents root and
-# package-local record trees; keep unrelated application dot folders visible.
 **/aidlc/spaces/*/intents/**/.aidlc-engine/
 **/aidlc/spaces/*/intents/**/.aidlc-sensors/
-# DocumentKB staged-transaction scratch: `onboard` stages a document into
-# `.journal/<txn-id>/` and renames it into place under the audit lock. Per-clone
-# and transient -- a committed journal would be a merge conflict on every
-# concurrent sync, and a crashed run's leftovers would be committed as if they
-# were work. Collected on the next sync; named by txn id, referenced by no index
-# row, so removal is always safe.
 aidlc/spaces/*/knowledge/documentkb/.journal/
-# DocumentKB `linked`-source alias map: alias -> a machine-specific ABSOLUTE
-# root. Committing it would give every clone one developer's directory layout,
-# which is the exact failure the "never an absolute path in committed metadata"
-# rule exists to prevent. The committed side holds only the alias.
 aidlc/spaces/*/knowledge/.sources.local.json
 aidlc/spaces/*/intents/*/runtime-graph.json
 aidlc/spaces/*/intents/*/.aidlc-*
-# Redacted diagnostic reports (/aidlc --doctor --export): regenerated, meant to
-# be shared then deleted — machine-local derived output, never shared truth.
 aidlc/diagnostics/
-#
-# COMMITTED (NOT ignored, listed here for the record — do NOT add ignore rules
-# for these): aidlc/spaces/*/memory/** · aidlc/spaces/*/codekb/** ·
-# aidlc/spaces/*/intents/intents.json · aidlc/spaces/*/intents/*/aidlc-state.md ·
-# aidlc/spaces/*/intents/*/audit/*.md (the audit trail, committed as PER-CLONE
-# SHARDS: each machine appends to audit/<host>-<clone>.md so git never merges
-# concurrent appends — there is intentionally NO .gitattributes merge=union,
-# which was proven to corrupt the multi-line audit blocks) ·
-# aidlc/spaces/*/intents/*/<phase>/<stage>/*.md (artifacts + diary).
+.claude/settings.local.json
 # END AI-DLC:gitignore
 
 # formicarium build outputs
