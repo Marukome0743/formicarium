@@ -7,16 +7,16 @@ instead of in chat, write your answer after `[Answer]:` and tell me in chat when
 
 Approve the code plan for u3-install?
 
-- Builds: 実配信入力を復元し、必須試験のskipを拒否するU3 CI・受入入口の修正。
-- Touches: scripts/migration-installのCI入力・実行・完了確認、専用workflow、acceptance試験、固定CI入力と実装記録。
-- Tests: 入力欠落・改変・不正パス・容量超過とexit0のskipを拒否し、実配信8試験skip0、新候補の回帰・coverage80%以上・正式36試行・署名付き同一候補CIを確認する。
-- Already changed before you approved (20 files): .artifacts/migration-install/actual-site.tar.gz, .build/scripts/migration-install/ci-inputs.js, .build/scripts/migration-install/ci-inputs.js.map, .build/scripts/migration-install/ci.js, .build/scripts/migration-install/ci.js.map, .build/scripts/migration-install/completion.js, .build/scripts/migration-install/completion.js.map, .build/tests/migration-install/acceptance.test.js, .build/tests/migration-install/acceptance.test.js.map, .github/workflows/migration-install-u3.yml (and 10 more).
+- Builds: 実配信入力・必須試験の受入入口と、単一writerを確認したrealmのcoverage読出し負荷の修正。
+- Touches: U3 CI入力・実行・受入入口と記録、共有scripts/package/coverage.tsのbridgeSource、対応coverage試験。
+- Tests: 固定入力・skip拒否に加えcounterの値と可視性を維持し、計測付きNode115件、新候補の回帰・全21JS coverage80%以上・正式36試行・署名付き同一候補CIを確認する。
+- Already changed before you approved (2203 files): .artifacts/migration-install/actual-site/tools.json, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package.manifest.json, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/LICENSE, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/README.md, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/THIRD_PARTY_NOTICES.md, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/aletheia-works-formicarium-0.3.0.tgz, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/assets/blink.mjs, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/assets/blink.wasm, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/assets/build-info.json, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/package.json (and 2193 more).
 
 Full plan: aidlc/spaces/default/intents/261012-terrarium-migration/construction/u3-install/code-generation/code-generation-plan.md
 Test instructions: aidlc/spaces/default/intents/261012-terrarium-migration/construction/u3-install/code-generation/unit-test-instructions.md
 
-[Approval Fingerprint]: sha256:v3:b598cbdb5bd5581225b085d50102094281bf616ed931cd65c2ab29e3486a780d
-[Planned Source]: 4c700a870b6fba417c03fbc32512cdb97d1d9c86b1e1085fa527d4e6983590e8
+[Approval Fingerprint]: sha256:v3:7824e76aac62a2de729668b8d14e9dcfc21c333e3573ed74771592f0e74a71fe
+[Planned Source]: db4f51c8cf245006b6ae096d886d9695a9b396c21d44086e8b3209b5096308aa
 
 - A. Approve Plan
 - B. Request Changes

@@ -31,7 +31,7 @@ const row=${JSON.stringify(layout)}.find(row=>row.path===key);
 if(!row)throw Error('unexpected coverage file');
 if(JSON.stringify(Object.keys(file.s))!==JSON.stringify(row.keys))throw Error('coverage statement map mismatch');
 Atomics.store(globalThis.__coverageCounters,row.registeredOffset,1);
-for(let i=0;i<row.keys.length;i++)Object.defineProperty(file.s,row.keys[i],{enumerable:true,get(){return Atomics.load(globalThis.__coverageCounters,row.offset+i)},set(value){if(!Number.isSafeInteger(value)||value<0)throw Error('coverage counter requires nonnegative safe integer');Atomics.store(globalThis.__coverageCounters,row.offset+i,Math.min(value,2147483647))}});
+for(let i=0;i<row.keys.length;i++){const index=row.offset+i;let latest=Atomics.load(globalThis.__coverageCounters,index);Object.defineProperty(file.s,row.keys[i],{enumerable:true,get(){return latest},set(value){if(!Number.isSafeInteger(value)||value<0)throw Error('coverage counter requires nonnegative safe integer');const bounded=Math.min(value,2147483647);Atomics.store(globalThis.__coverageCounters,index,bounded);latest=bounded}});}
 object[key]=file;return true;}}); Atomics.store(globalThis.__coverageCounters,0,1);`;
 }
 export function mergeRealms(metadata, layout, realms, expectedNames) {

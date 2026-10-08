@@ -2,9 +2,13 @@
 
 ## Status
 
+現在の作業はCI run38766787639の計測付きNode TIMEOUTに対する共有collector修正。mainがRED（13tests・12pass・1fail、Atomic.load増分2049/期待0、全2048counter/store値一致）を観測し、承認済みのgetter局所値・毎setter Atomic.storeへ最小変更した。検証済み：対象coverage17件・acceptance32件・実配信8件に加え、新候補の全18工程exit0、全21JS coverage1768/1929=91.65%・skip0、正式36試行成功（最大組中央値2633.08ms）。証明書一時登録・計測・削除wrapper exit0、別途find exit44で未登録確認済み。source8897cea442a680b469c474b0a8164175b5499a48f200cc1bd6eb8f7f4054967c、manifest f229d672ea9093659447a32b98af33031a384937c69ddb82d2955ef2f5e689f5、候補814696a5、pack cc89（製品bytes不変）。追加署名付きpush/CIは未実施で、U3正式完了ではない。詳細は [collector-single-writer-recovery.md](collector-single-writer-recovery.md)。以下のeb50 source・ccbd headのローカル成功は修正前の履歴として保持する。
+
 2026-10-16更新。検証済み：CI入力修正後の新候補について、mainの非TLS18工程は全exit0。全21JSの行coverageは1768/1929=91.65%、skip0。固定サイト復元と実配信8pass・skip0、同source/packの正式36試行も成功し、6組すべての非download中央値が3000ms以下。mainの証明書一時登録・計測・削除wrapperはexit0、削除後の未登録も確認済み。署名付きU3 CI・独立最終レビュー・正式完了確認は未完了で、U3正式受入れの完了は主張しない。実機Safariは未検証。
 
 ## Files Created or Modified
+
+- scripts/package/coverage.ts/生成JS、tests/package/coverage.test.ts/生成JS：共有bridgeの単一writer確認に基づくgetter Atomic.load反復削減と、counter列・realm独立性・中断後host可視性の回帰。生成JSはmain buildだけで更新する。U3 manifestへ4個別パスを追加した。
 
 - runtime/install-catalog.ts、install-transfer.ts、install-archive.ts、install-lifecycle.ts、install.tsと各生成JS：caller catalogの固定snapshot、有限HTTPS取得、全archive検査、取消・通知・原子的登録。
 - runtime/public.ts/生成JS、types/index.d.ts：既存公開entryからC04を公開し、内部SessionPortを非公開のまま利用。
@@ -17,7 +21,7 @@
 
 - README.md、docs/install-api.md：実装済みのC04 API、caller catalog、取得・上限・取消・進捗・エラー・利用例と未完了の受入範囲を説明。READMEのinstallを後続扱いする文を更新し、U4 commandは後続のまま保持する。
 
-個別の実ファイル106件（.gitignore、CI入力41ファイルを含む）をsource-manifest.jsonに列挙した。ディレクトリ・glob・.js.mapのclaimはない。JSはmainの承認済みbuildが生成し、手修正していない。.gitignoreにはU3生成JS24個の個別例外を追加し、U2既存例外と.js.map除外を維持した。mainが対象生成JS27個、従来CI入力40ファイルと新archive blobをjj追跡し、新blobのfile trackもexit0だった。Step 11全体は未完了である。
+個別の実ファイル110件（共有collector変更4件、.gitignore、CI入力41ファイルを含む）をsource-manifest.jsonに列挙した。ディレクトリ・glob・.js.mapのclaimはない。JSはmainの承認済みbuildが生成し、手修正していない。.gitignoreにはU3生成JS24個の個別例外を追加し、U2既存例外と.js.map除外を維持した。従来の対象生成JS27個とCI入力41ファイルの追跡観測は保持し、最新共有変更の追跡確認はmainが行う。Step 11全体は未完了である。
 
 ## Implementation Decisions
 

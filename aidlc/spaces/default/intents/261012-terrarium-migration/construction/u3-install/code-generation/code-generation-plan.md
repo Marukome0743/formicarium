@@ -1,9 +1,9 @@
 # U3 install 実装計画
 
 ## Summary
-- Builds: 実配信入力を復元し、必須試験のskipを拒否するU3 CI・受入入口の修正。
-- Touches: scripts/migration-installのCI入力・実行・完了確認、専用workflow、acceptance試験、固定CI入力と実装記録。
-- Tests: 入力欠落・改変・不正パス・容量超過とexit0のskipを拒否し、実配信8試験skip0、新候補の回帰・coverage80%以上・正式36試行・署名付き同一候補CIを確認する。
+- Builds: 実配信入力・必須試験の受入入口と、単一writerを確認したrealmのcoverage読出し負荷の修正。
+- Touches: U3 CI入力・実行・受入入口と記録、共有scripts/package/coverage.tsのbridgeSource、対応coverage試験。
+- Tests: 固定入力・skip拒否に加えcounterの値と可視性を維持し、計測付きNode115件、新候補の回帰・全21JS coverage80%以上・正式36試行・署名付き同一候補CIを確認する。
 
 ## 前提と境界
 承認済みC02/C03/C04/C11、U3 functional-design、nfr-requirements、nfr-design、infrastructure-designを実装根拠とする。直接要件FR1/FR4/FR5/FR6とBR3.1–3.10に追跡する。User Storiesは生成されていない。
@@ -37,7 +37,17 @@ Steps 1–7は既存実装の履歴として保持する。本再開での修正
 5. 既存acceptance28ケースを維持し、固定参照の正常copy、参照元欠落・wrong source path・同サイズSHA改変・symlink、archiveへの参照guest再混入、10件の欠落/extra、fallback禁止、materialized11件の総量/個別/metadata/entry上限/+1を追加する。不具合の再現テストの失敗をmainで観測してから参照方式を実装し、同じ試験で成功を確認する。既存TAP/Node spec/Playwrightの正summary・skip/fail/空結果拒否も維持する。mainでbuild、typecheck、単位内acceptanceを逐次実行した後、新圧縮ファイルを作成・inspectして実合計を確認する。全ソース/生成JSを確定してから旧ci/migration-installを新規UUID付き.artifactsへrename保存し、canonical入力をprepare/inspect/restoreする。旧bundle/payload・全11件archive・v5/旧reportを上書きしない。CIと同じ復元環境でtests/guest-distribution/integration.test.jsの8件が全実行され、8pass・skip0となることを先に確認する。個別source-manifestと新固定CI入力を整合させる。
 6. 修正後のsource/pack/consumerを新しく固定し、Steps 9–11へ戻る。旧v5の21工程と旧候補の正式36試行は履歴として保持する。正式36試行後は証明書削除・未登録を確認し、署名付きpushと1回のCIの実コマンドは別途承認を待つ。新U3結果を証明する短い完了確認コマンドも提示して承認を待つ。
 
-## テスト設計と追跡
+## 追加Step 8：CI 38766787639の計測処理修正
+
+根拠は同stageの `ci-38766787639-failure-and-repair-proposal.md` の「承認対象の修正案」1–5。人間は180秒期限と品質基準を維持した実装・再検証を明示承認した。AI-DLCの新approval receipt記録後にだけ実装する。本変更はStep 8の共有計測部品に限定し、Steps 1–7の製品実装・SHA・公開APIを再設計しない。
+
+1. CI attempt1/run38766787639/job116531969277の失敗ZIP・13工程成功・計測付きNode115件中113pass/2fail/skip0を保持する。2件はvalidateGuest後の180秒TIMEOUTであり、coverage getter/setterのAtomic反復コストの寄与は現時点で推測・未検証。CI失敗をAI-DLC本体の不具合や成功証拠として扱わない。
+2. scripts/package/coverage.tsのbridgeSourceと、そのNode/Worker/browserの生成・観測経路を調査し、counterがrealmごとに単一writer、hostの役割が読取りだけであることを確認して影響資料へ残す。共有部品のU1/U2利用も対象にする。単一writerを確認できなければ適用せず停止して確認する。
+3. 確認できたcounterに限り、初期値をAtomics.loadで一度取り、getterはrealm内の最新値を参照する。setterは従来どおり非負安全整数を検証し、MAX_INT32へ飽和した値を毎回Atomics.storeで公開した後に最新値を更新する。counter列、statement map、realm登録、Atomic書込みと飽和の意味を維持する。hit-only化・sampling・SHA省略・試験skipは行わない。
+4. tests/package/coverage.test.tsへ従来方式とのcounter列一致、複数realmの独立性、Worker中断後のhost可視性を追加し、既存の境界・飽和・不正値拒否を維持する。不具合の再現試験をmainで観測してから最小修正し、同じ試験で再確認する。build/typecheck、package coverage試験、U3 acceptanceを順番に実行した後、新候補から計測付きU2/U3 Nodeの同じ115件を省略せず実行して、成功件数・skip0・実時間を観測する。性能改善量は観測前に断定しない。
+5. 実装・mainの生成後に共有変更4パス（scripts/package/coverage.ts、scripts/package/coverage.js、tests/package/coverage.test.ts、tests/package/coverage.test.js）をU3の個別source-manifest claimへ明示し、旧U1/U2の封印証拠は編集しない。新source/candidate/consumer/CI入力を固定し、全回帰・全21配布JS/全realm coverage80%以上・正式36試行を新しく実行する。install180秒、非download中央値3秒、probe600秒、aube840秒、1worker、retry0、容量上限と論理集計規則は不変。旧sourceの成功証拠・失敗ZIPを保存し、上書き・付替えをしない。ローカル成功後に追加の署名付きpushとCI再試行1回の実コマンドを提示して個別承認を待つ。新CI成功と新短縮完了確認を得る前にU3完了を生成しない。
+
+## テスト設計と追跡（共通）
 CatalogResolver、AssetTransfer、ArchiveInspector、OperationLifetime、ProgressReporterは各5–8以上の意味のあるケース。SessionPort/validateGuest境界と独立consumerを統合テストで確認する。定数を読み返すだけのテストではなく、境界直前/超過、正しいarchiveと不正archive、race時の状態・旧guest・後始末を観測する。
 FR4→Steps2–7、FR5→Steps5–7、FR1→Steps7/9–11、FR6→Steps6–11。BR3.10→Steps8–11。NFR1–4/6–8の12詳細IDは各D1–D6実装と受入れへ逆方向も追跡する。
 追加Step7は公開C03契約を変えずに実装の割当て量を減らす計画変更である。元のStep5のU2変更限定には、この承認対象のguest-validation.ts/生成JS変更を明示的に追加する。未達結果は正式受入れへ置換せず、新source inventory・候補・独立consumerと実36試行で再判定する。

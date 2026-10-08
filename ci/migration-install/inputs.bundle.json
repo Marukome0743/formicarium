@@ -577,11 +577,11 @@
     },
     {
       "path": "scripts/package/coverage.js",
-      "sha256": "b8b74e86724d48dce518586764c5dab703bfc17a5c8bd2fcbbbdb9eb8485b1a7"
+      "sha256": "446ddb5b1c90ac4b582912d6fb31f604352d06d9ef4ab65ffe321e09610182a8"
     },
     {
       "path": "scripts/package/coverage.ts",
-      "sha256": "dc6ef1dbd9b665c99b898afece3cc53981e6326e0b93672f844c42eee2077550"
+      "sha256": "52ceea5870f5fbef8886d3b71cdaf0825d4d5c0ca3608cd5b013e265a90b20c7"
     },
     {
       "path": "scripts/package/stage-package.js",
@@ -1121,11 +1121,11 @@
     },
     {
       "path": "tests/package/coverage.test.js",
-      "sha256": "ae416d89ef36fddee9a65edf0a225524d8445c97fdc9f8aac7c8b29ee7d156af"
+      "sha256": "ea0a8053996cc231d51aee8eb9c00f8305b9293de50da63d95718c637f1d5a07"
     },
     {
       "path": "tests/package/coverage.test.ts",
-      "sha256": "9cbf801b9223d6d6a691faa6e8baf7273430acc59848de7eaa5a0fb3a985c0b1"
+      "sha256": "39f04a14e2fc3546d61ffacdbb9a54dbbb7d5ff598a42e494d353c28b1ec112f"
     },
     {
       "path": "tests/package/errors.test.js",

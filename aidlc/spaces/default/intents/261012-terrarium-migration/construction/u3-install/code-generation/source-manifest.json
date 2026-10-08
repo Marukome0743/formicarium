@@ -226,6 +226,12 @@
       "path": "scripts/package/coverage-inventory.json"
     },
     {
+      "path": "scripts/package/coverage.ts"
+    },
+    {
+      "path": "scripts/package/coverage.js"
+    },
+    {
       "path": "scripts/package/stage-package.js"
     },
     {
@@ -314,6 +320,12 @@
     },
     {
       "path": "tests/migration-install/types-valid.ts"
+    },
+    {
+      "path": "tests/package/coverage.test.ts"
+    },
+    {
+      "path": "tests/package/coverage.test.js"
     },
     {
       "path": "tsconfig.tests.json"

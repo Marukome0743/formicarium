@@ -68,7 +68,34 @@ U2_ACTUAL_SITE="$PWD/.artifacts/migration-install/actual-site" /Users/mutoakio/.
 
 restoreは固定manifest sourceとblob、復元済み `dist/guests/aube` をbytes/SHA・regular fileとして検査してから、10件とcopy1件でサイトを構成する。既存siteがある場合は全11件を再検査し、黙って上書きしない。圧縮入力は既存CI manifestの通常の論理合計へ加え、materialized11件にも256MiB合計・128MiB個別・1MiB metadata・4096entryを適用する。最後の実配信8pass・skip0後も、新source/pack/consumerでcoverage・回帰・36試行・署名付きCI・正式完了確認を別途実施する。push/CIの具体コマンドと新しい短い完了確認コマンドは、従来どおり個別承認を待つ。
 
-## 追加SHAの必須ケース
+## CI 38766787639：共有coverage bridge修正の追加手順
+
+同stageの `ci-38766787639-failure-and-repair-proposal.md` の承認対象1–5だけを実施する。CIの計測付きNodeは115件中113pass・2fail・skip0で、2件はinstall180秒期限を超過した。Atomic getter反復コストの寄与は推測のため、実測前に唯一の原因や改善量を断定しない。旧失敗ZIPと旧source成功証拠は保持する。
+
+実装前に、realmごとのcounter単一writerとhost読取りだけの所有関係を、生成bridge・Node/Worker/browserの経路で確認する。共有部品のU1/U2への影響も記録する。保証できなければ修正を適用せず確認する。保証できた場合だけ、初期Atomics.load＋realm内最新値getterと、毎回の飽和Atomics.store後の最新値更新へ変更する。hit-only、sampling、counter省略は不可。
+
+tests/package/coverage.test.tsの既存境界・飽和・不正値拒否に、従来方式との同じcounter列、複数realmの独立性、Worker中断後のhost可視性を追加する。不具合修正の失敗観測→修正→同じ試験で成功をmainで逐次実施する。新しいapproval receipt記録前に実装・試験を開始しない。
+
+```sh
+mise run build
+mise run typecheck
+/Users/mutoakio/.local/share/mise/installs/node/24.21.0/bin/node --test --test-concurrency=1 tests/package/coverage.test.js
+/Users/mutoakio/.local/share/mise/installs/node/24.21.0/bin/node --test --test-concurrency=1 tests/migration-install/acceptance.test.js
+```
+
+対象回帰後、mainが新source・候補・独立consumerを準備し、FORMICARIUM_CANDIDATE/FORMICARIUM_CONSUMER/FORMICARIUM_SESSION_GUESTと検証済みU2_ACTUAL_SITEをその実入力へ設定する。既存出力を上書きしない新規coverageディレクトリを用い、以下の同じ12個別ファイル・115試験の実行件数・経過時間・fail/cancel/skip/TODO0を確認する。期待件数に合わせてskipや分母削除を行わない。
+
+```sh
+FORMICARIUM_U3_REPAIR_COVERAGE="$PWD/.artifacts/migration-install/collector-repair-coverage-20261016"
+/Users/mutoakio/.local/share/mise/installs/node/24.21.0/bin/node scripts/migration-install/coverage.js prepare "$FORMICARIUM_U3_REPAIR_COVERAGE"
+/Users/mutoakio/.local/share/mise/installs/node/24.21.0/bin/node --import "$FORMICARIUM_U3_REPAIR_COVERAGE/coverage-session-node-preload.mjs" --test --test-reporter=tap --test-isolation=none "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-session/guest-validation.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-session/fixture.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-session/reservation.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-session/public.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-session/consumer.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/catalog.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/transfer.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/archive.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/lifecycle.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/public.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/consumer.test.js" "$FORMICARIUM_U3_REPAIR_COVERAGE/tests/migration-install/hash-regression.test.js"
+```
+
+その後は新sourceに対する固定CI入力prepare/inspect/restore、新候補の全回帰・全21JS/全realm coverage80%以上・正式36試行を別工程として実行する。install180秒、非download中央値3秒、probe600秒、aube840秒、1worker、retry0、既存容量上限を維持する。正式36試行は計測を掛けない製品経路で実行し、証明書一時登録・削除は既存の具体承認手順に従う。
+
+ローカル検証成功後にだけ、mainが追加の署名付きpushとCI再試行1回の実コマンドを提示して個別承認を待つ。CI失敗から合格の完了確認を生成しない。既存artifact verifierの旧source/失敗run向けbindingは履歴として残し、新source・実CI結果に対応する短い完了確認コマンドを改めて提示・承認してから確定する。
+
+## 追加SHAの必須ケース（既存）
 独立Node crypto/WebCryptoの結果を比較し、空入力、既知vector、55/56/63/64/65byte padding境界、複数block、binary、offset付きviewを5–8以上の意味のあるケースで確認する。既存C03の不正ELF/digest/metadata/偽造handle拒否、コピー保護を維持する。Node/3browserの公開consumerと新候補の実36試行は、純SHA試験とは別に確認する。速さの予測を合格結果として扱わない。
 
 ## 必須ケース
