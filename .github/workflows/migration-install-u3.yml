@@ -96,6 +96,9 @@ jobs:
             .artifacts/migration-install/completion-*/coverage/coverage-node*.json
             .artifacts/migration-install/completion-*/coverage/coverage-session-node*.json
             .artifacts/migration-install/completion-*/coverage/install-collection-boundary.json
+            .artifacts/migration-install/completion-*/coverage/coverage-playwright-generation.json
+            .artifacts/migration-install/completion-*/coverage/coverage-playwright-node/**/*.json
+            .artifacts/migration-install/completion-*/coverage/coverage-playwright-node/**/*.jsonl
             .artifacts/migration-install/completion-*/coverage/**/coverage-realms.json
             .artifacts/migration-install/completion-*/measurement/measurement-report.json
             .artifacts/migration-install/completion-*/measurement/trials/*.json

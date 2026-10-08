@@ -1,16 +1,77 @@
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile, } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { gzipSync } from 'node:zlib';
 import test from 'node:test';
+import { gzipSync } from 'node:zlib';
 import { mapInstallCICommand, validateInstallCIContext, } from '../../scripts/migration-install/ci.js';
-import { decodeInstallSiteArchive, INSTALL_ACTUAL_SITE_FILES, INSTALL_INPUT_POLICY, INSTALL_SITE_ARCHIVE, INSTALL_SITE_REFERENCE, inspectInstallActualSite, requireInstallActualSite, readInstallSiteReference, validateInstallSiteReferenceManifest, validateInstallSiteBudget, validateInstallSiteEntry, } from '../../scripts/migration-install/ci-inputs.js';
-import { executeInstallCommand, assertInstallTestOutput, isInstallTestCommand, installCompletionCommands, verifyInstallCommandLog, } from '../../scripts/migration-install/completion.js';
-import { sha256 } from '../../scripts/package/stage-package.js';
+import { decodeInstallSiteArchive, INSTALL_ACTUAL_SITE_FILES, INSTALL_INPUT_POLICY, INSTALL_SITE_ARCHIVE, INSTALL_SITE_REFERENCE, inspectInstallActualSite, readInstallSiteReference, requireInstallActualSite, validateInstallSiteBudget, validateInstallSiteEntry, validateInstallSiteReferenceManifest, } from '../../scripts/migration-install/ci-inputs.js';
+import { assertInstallTestOutput, executeInstallCommand, installCompletionCommands, isInstallTestCommand, verifyInstallCommandLog, } from '../../scripts/migration-install/completion.js';
 import { assertInstallNodeRealms, INSTALL_REALMS, } from '../../scripts/migration-install/coverage.js';
 import { summarizeInstallTrials } from '../../scripts/migration-install/measure.js';
 import { CI_INPUT_PATHS, validateCIInputManifest, } from '../../scripts/migration-session/ci-inputs.js';
+import { instrumentPackage, readPlaywrightNodeRealms, } from '../../scripts/package/coverage.js';
+import { PACKAGE_FILES, sha256 } from '../../scripts/package/stage-package.js';
 /** Synthetic unit fixtures test validators; these are never acceptance evidence. */
+test('all three generated Playwright Node bootstraps capture real static product imports and refuse absent suite evidence', async () => {
+    const scratch = await mkdtemp(resolve('.artifacts', 'u3-runner-real-'));
+    try {
+        const source = resolve(scratch, 'source'), out = resolve(scratch, 'coverage');
+        for (const path of PACKAGE_FILES) {
+            const target = resolve(source, path);
+            await mkdir(dirname(target), { recursive: true });
+            await writeFile(target, path === 'runtime/contracts.js' ? 'export const imported = 1;' : '');
+        }
+        await instrumentPackage({ source, out });
+        await writeFile(resolve(out, 'package.json'), '{"type":"module"}');
+        const env = { ...process.env };
+        delete env.NODE_TEST_CONTEXT;
+        const launched = new Map();
+        for (const suite of ['package', 'session', 'install']) {
+            const entry = resolve(out, `entry-${suite}.mjs`);
+            await writeFile(entry, `import './coverage-playwright-node-${suite}.mjs';\nimport {imported} from './runtime/contracts.js';if(imported!==1)throw Error('actual product import missing');`);
+            const child = spawn(process.execPath, [entry], {
+                env,
+                stdio: ['ignore', 'ignore', 'pipe'],
+            });
+            let stderr = '';
+            child.stderr.setEncoding('utf8');
+            child.stderr.on('data', (text) => {
+                stderr += text;
+            });
+            const [code, signal] = await once(child, 'close');
+            assert.equal(signal, null, stderr);
+            assert.equal(code, 0, stderr);
+            assert.ok(child.pid, stderr);
+            launched.set(suite, child.pid);
+        }
+        const realms = await readPlaywrightNodeRealms(out, [
+            'package',
+            'session',
+            'install',
+        ]);
+        assert.equal(realms.length, 3);
+        for (const realm of realms)
+            assert.ok([...new Int32Array(realm.buffer)].some((count, index) => index > 0 && count > 0));
+        const generation = JSON.parse(await readFile(resolve(out, 'coverage-playwright-generation.json'), 'utf8'));
+        for (const [suite, pid] of launched)
+            assert.equal(await readFile(resolve(out, 'coverage-playwright-node', suite, 'launches.jsonl'), 'utf8'), `${JSON.stringify({ ...generation, suite, pid, ppid: process.pid })}\n`, `${suite} ledger holds exactly its launched runner identity`);
+        const installLedger = resolve(out, 'coverage-playwright-node/install/launches.jsonl');
+        const stashedLedger = resolve(scratch, 'install-launches.jsonl');
+        await rename(installLedger, stashedLedger);
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package', 'session', 'install']), /Playwright/, 'a suite without its launch ledger must be refused');
+        await rename(stashedLedger, installLedger);
+        assert.equal((await readPlaywrightNodeRealms(out, ['package', 'session', 'install']))
+            .length, 3);
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package', 'session']), /Playwright/);
+        await writeFile(resolve(out, 'coverage-playwright-node/package/999999.end.json'), '{}');
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package', 'session', 'install']), /Playwright/);
+    }
+    finally {
+        await rm(scratch, { recursive: true, force: true });
+    }
+});
 function trials() {
     return ['aube', 'biome'].flatMap((tool) => ['chromium', 'firefox', 'webkit'].flatMap((browser) => Array.from({ length: 6 }, (_, trial) => ({
         tool,
@@ -126,9 +187,19 @@ test('U3 archive admission rejects the guest supplied only by the fixed existing
     assert.throws(() => validateInstallSiteEntry(referencedGuest, 36948544), /reference|excluded|archive/);
 });
 test('U3 fixed reference manifest permits exactly the existing source identity and no fallback aliases', () => {
-    const row = { path: INSTALL_SITE_REFERENCE.source, bytes: INSTALL_SITE_REFERENCE.bytes, sha256: INSTALL_SITE_REFERENCE.sha256 };
+    const row = {
+        path: INSTALL_SITE_REFERENCE.source,
+        bytes: INSTALL_SITE_REFERENCE.bytes,
+        sha256: INSTALL_SITE_REFERENCE.sha256,
+    };
     assert.doesNotThrow(() => validateInstallSiteReferenceManifest([row]));
-    for (const rows of [[], [{ ...row, path: '.artifacts/u2-release-inputs/aube-v2.7.0/aube' }], [{ ...row, bytes: row.bytes + 1 }], [{ ...row, sha256: '0'.repeat(64) }], [row, row]])
+    for (const rows of [
+        [],
+        [{ ...row, path: '.artifacts/u2-release-inputs/aube-v2.7.0/aube' }],
+        [{ ...row, bytes: row.bytes + 1 }],
+        [{ ...row, sha256: '0'.repeat(64) }],
+        [row, row],
+    ])
         assert.throws(() => validateInstallSiteReferenceManifest(rows), /fixed reference source missing\/differs/);
 });
 test('U3 fixed source reader requires its one path, refuses same-size mutation and symlinks, and reads actual accepted bytes', async () => {
@@ -276,7 +347,10 @@ test('U3 CI maps only scoped unit/browser tasks and refuses escaping cwd or arbi
     }, root);
     assert.ok(browser.args.includes('--workers=1'));
     assert.ok(browser.args.includes('--retries=0'));
-    assert.deepEqual(browser.args.filter((arg) => arg.endsWith('.spec.ts')), ['tests/migration-install/consumer.spec.ts', 'tests/migration-install/hash-regression.spec.ts']);
+    assert.deepEqual(browser.args.filter((arg) => arg.endsWith('.spec.ts')), [
+        'tests/migration-install/consumer.spec.ts',
+        'tests/migration-install/hash-regression.spec.ts',
+    ]);
     for (const command of [
         { executable: 'bash', cwd: root, args: ['anything'] },
         {
@@ -290,11 +364,24 @@ test('U3 CI maps only scoped unit/browser tasks and refuses escaping cwd or arbi
 });
 const completeTap = '# tests 2\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
 test('U3 accepts complete TAP, spec and Playwright summaries and all concatenated Node suites', () => {
-    for (const raw of [completeTap, completeTap.replace(/^# /gm, 'ℹ '), completeTap + completeTap, '  45 passed (42.2s)\n'])
+    for (const raw of [
+        completeTap,
+        completeTap.replace(/^# /gm, 'ℹ '),
+        completeTap + completeTap,
+        '  45 passed (42.2s)\n',
+    ])
         assert.doesNotThrow(() => assertInstallTestOutput(raw));
 });
 test('U3 rejects zero, missing and malformed test summaries including incomplete Node counts', () => {
-    for (const raw of ['', 'exit0', '0 passed', completeTap.replaceAll('2', '0'), completeTap.replace('# tests 2', '# tests 3'), completeTap.replace('# todo 0\n', ''), completeTap + '# pass 1\n'])
+    for (const raw of [
+        '',
+        'exit0',
+        '0 passed',
+        completeTap.replaceAll('2', '0'),
+        completeTap.replace('# tests 2', '# tests 3'),
+        completeTap.replace('# todo 0\n', ''),
+        completeTap + '# pass 1\n',
+    ])
         assert.throws(() => assertInstallTestOutput(raw), /summary|incomplete/);
 });
 test('U3 rejects each positive Node incomplete count and TAP skip/TODO directives', () => {
@@ -304,7 +391,13 @@ test('U3 rejects each positive Node incomplete count and TAP skip/TODO directive
         assert.throws(() => assertInstallTestOutput(completeTap + `ok 3 - required # ${directive}\n`), /skip|TODO|incomplete/);
 });
 test('U3 rejects Playwright skipped, failed, flaky, interrupted and not-run rows despite passed tests', () => {
-    for (const field of ['skipped', 'failed', 'flaky', 'interrupted', 'did not run'])
+    for (const field of [
+        'skipped',
+        'failed',
+        'flaky',
+        'interrupted',
+        'did not run',
+    ])
         assert.throws(() => assertInstallTestOutput(`1 ${field}\n45 passed (1s)\n`), /skip|TODO|incomplete/);
 });
 test('U3 log replay rejects retained exit0 skip and digest tampering without requiring summaries for builds', async () => {
@@ -315,15 +408,26 @@ test('U3 log replay rejects retained exit0 skip and digest tampering without req
         const path = resolve(directory, 'raw.log');
         const raw = completeTap.replace('# skipped 0', '# skipped 1');
         await writeFile(path, raw);
-        const command = { executable: process.execPath, cwd: process.cwd(), args: ['--test', 'required.test.js'] };
-        const execution = { rawLogPath: path, rawLogSha256: sha256(raw), exitCode: 0 };
+        const command = {
+            executable: process.execPath,
+            cwd: process.cwd(),
+            args: ['--test', 'required.test.js'],
+        };
+        const execution = {
+            rawLogPath: path,
+            rawLogSha256: sha256(raw),
+            exitCode: 0,
+        };
         await assert.rejects(verifyInstallCommandLog(command, execution), /skip|TODO|incomplete/);
         await writeFile(path, completeTap);
         await assert.rejects(verifyInstallCommandLog(command, execution), /log\/exit differs/);
         const build = { ...command, args: ['scripts/ci/tasks.ts', 'build'] };
         assert.equal(isInstallTestCommand(build), false);
         await writeFile(path, 'build completed\n');
-        await assert.doesNotReject(verifyInstallCommandLog(build, { ...execution, rawLogSha256: sha256('build completed\n') }));
+        await assert.doesNotReject(verifyInstallCommandLog(build, {
+            ...execution,
+            rawLogSha256: sha256('build completed\n'),
+        }));
     }
     finally {
         await rm(directory, { recursive: true, force: true });
@@ -369,22 +473,37 @@ function siteTarMember(path, size = 0, type = 48) {
     header.fill(32, 148, 156);
     header[156] = type;
     header.write('ustar\0', 257);
-    header.write(header.reduce((sum, byte) => sum + byte, 0).toString(8).padStart(6, '0') + '\0 ', 148);
+    header.write(header
+        .reduce((sum, byte) => sum + byte, 0)
+        .toString(8)
+        .padStart(6, '0') + '\0 ', 148);
     return header;
 }
 test('U3 site archive refuses gzip corruption, missing inventory, unknown/traversal paths, links and duplicate files', () => {
     const known = INSTALL_ACTUAL_SITE_FILES[0].path;
     assert.throws(() => decodeInstallSiteArchive(new Uint8Array([1, 2, 3])));
     assert.throws(() => decodeInstallSiteArchive(gzipSync(Buffer.alloc(1024))), /missing inventory/);
-    for (const path of ['unknown.json', '../escape', '/absolute', 'dist/../escape'])
+    for (const path of [
+        'unknown.json',
+        '../escape',
+        '/absolute',
+        'dist/../escape',
+    ])
         assert.throws(() => decodeInstallSiteArchive(gzipSync(Buffer.concat([siteTarMember(path), Buffer.alloc(1024)]))), /unknown path|UNSAFE_ASSET_PATH/);
     assert.throws(() => decodeInstallSiteArchive(gzipSync(Buffer.concat([siteTarMember(known, 0, 50), Buffer.alloc(1024)]))), /symlink\/special/);
-    assert.throws(() => decodeInstallSiteArchive(gzipSync(Buffer.concat([siteTarMember(known), siteTarMember(known), Buffer.alloc(1024)]))), /duplicate path/);
+    assert.throws(() => decodeInstallSiteArchive(gzipSync(Buffer.concat([
+        siteTarMember(known),
+        siteTarMember(known),
+        Buffer.alloc(1024),
+    ]))), /duplicate path/);
 });
 test('U3 archive rejects oversized metadata/file headers, broken checksum and missing complete terminator', () => {
     const metadata = INSTALL_ACTUAL_SITE_FILES.find((row) => row.path.endsWith('.json')).path;
     const guest = INSTALL_ACTUAL_SITE_FILES.find((row) => row.path.endsWith('/guest')).path;
-    for (const [path, bytes, reason] of [[metadata, 1048577, /metadata limit/], [guest, 134217729, /file byte limit/]])
+    for (const [path, bytes, reason] of [
+        [metadata, 1048577, /metadata limit/],
+        [guest, 134217729, /file byte limit/],
+    ])
         assert.throws(() => decodeInstallSiteArchive(gzipSync(siteTarMember(path, bytes))), reason);
     const broken = siteTarMember(metadata);
     broken[0] = broken[0] ^ 1;

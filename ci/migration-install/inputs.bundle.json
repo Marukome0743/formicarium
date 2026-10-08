@@ -133,7 +133,7 @@
     },
     {
       "path": ".github/workflows/migration-install-u3.yml",
-      "sha256": "03781436032b277907ac00e7d0687d3bf37d8b24c826edee25e61f642ebb6e76"
+      "sha256": "61647550f6c4db4defd34fd36fdb844f9b1a922b11d7823c7eaa5a369a459533"
     },
     {
       "path": ".github/workflows/migration-session-u2.yml",
@@ -153,7 +153,7 @@
     },
     {
       "path": "mise.toml",
-      "sha256": "7584e95f702b013e4b02b2ec5e97aa49dc12538b191d44758077d7d4d35db674"
+      "sha256": "8b2b3b7e80efabecd543a7bd55d48c523b4c82f8ef3b60c645ae19691b624263"
     },
     {
       "path": "package.json",
@@ -501,11 +501,11 @@
     },
     {
       "path": "scripts/migration-install/coverage.js",
-      "sha256": "e9c5090b0eff6bbb06de54a81d9f536e90e426997424561d4291ce385a7dc762"
+      "sha256": "e0bf074b758bc68c3da53d1e722d3baa1b60c13b369d838ea1e4fda0463589c7"
     },
     {
       "path": "scripts/migration-install/coverage.ts",
-      "sha256": "5212aa6eadc23277fb751f22868b4c2cc173f3b232a897f1f478e361a64e46fd"
+      "sha256": "5abe3f0e26f872486ec372c0fc2768397d7d957763e0c7a485bb827a57116e90"
     },
     {
       "path": "scripts/migration-install/measure.js",
@@ -557,11 +557,11 @@
     },
     {
       "path": "scripts/migration-session/coverage.js",
-      "sha256": "3d0a3acebeb41acee8d86087135d0e1ab30eb3790838fd4213bdbf2380a86433"
+      "sha256": "7479bb29fa43614536c57431badb69ed62eb9fbe556f55a5319d17aa6f3ab0dd"
     },
     {
       "path": "scripts/migration-session/coverage.ts",
-      "sha256": "bdcc1e44967446ce908c5d1f1d3ee9875008f7e96144c5acdab38cddb80170fe"
+      "sha256": "e0cb2631fd9850040d98595d5a32b370995f85ed596f441121f549df00b1c18c"
     },
     {
       "path": "scripts/migration-session/stage.js",
@@ -577,11 +577,11 @@
     },
     {
       "path": "scripts/package/coverage.js",
-      "sha256": "446ddb5b1c90ac4b582912d6fb31f604352d06d9ef4ab65ffe321e09610182a8"
+      "sha256": "406f82dc452b0e282050398c4233078e484268608468c5f13269e2c94697d08b"
     },
     {
       "path": "scripts/package/coverage.ts",
-      "sha256": "52ceea5870f5fbef8886d3b71cdaf0825d4d5c0ca3608cd5b013e265a90b20c7"
+      "sha256": "04c74a98d34125385c3dc0ed401b9de6c9d348db7d1b97852687bf81c93d96a9"
     },
     {
       "path": "scripts/package/stage-package.js",
@@ -777,11 +777,11 @@
     },
     {
       "path": "tests/migration-install/acceptance.test.js",
-      "sha256": "7dfb8801768ac82650a6b397733ea873f3dfcfd752c3d96d57701a54185d0b7e"
+      "sha256": "b4301dd9ca1f7d80e49d23e61e80d0e9f59dcc0216c46804c6f625dccfc434c8"
     },
     {
       "path": "tests/migration-install/acceptance.test.ts",
-      "sha256": "79e0a8857fad17c1555c9917d8e386c4cc23f7fc73340750fc2daafc08435f60"
+      "sha256": "1a5293eeb1e39cf5bab9861aad2e440ecfccd08a523097127ae05d8625e9eddb"
     },
     {
       "path": "tests/migration-install/archive.test.js",
@@ -1121,11 +1121,11 @@
     },
     {
       "path": "tests/package/coverage.test.js",
-      "sha256": "ea0a8053996cc231d51aee8eb9c00f8305b9293de50da63d95718c637f1d5a07"
+      "sha256": "aa3d6c2c7331807f0f2386b4dd387c51c880c19cfba0d840fce5ddfedb848b9e"
     },
     {
       "path": "tests/package/coverage.test.ts",
-      "sha256": "39f04a14e2fc3546d61ffacdbb9a54dbbb7d5ff598a42e494d353c28b1ec112f"
+      "sha256": "ff2ffff55062bd11843eef7055e2480380cbcc180c768df0898957b82375298e"
     },
     {
       "path": "tests/package/errors.test.js",

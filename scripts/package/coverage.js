@@ -1,12 +1,17 @@
-import { copyFile, cp, mkdir, readdir, readFile, writeFile, } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { copyFile, cp, lstat, mkdir, readdir, readFile, writeFile, } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from '@babel/parser';
+import * as babel from '@babel/types';
 import coverageLibrary from 'istanbul-lib-coverage';
 import { compiledTestConfig } from '../playwright-build-config.js';
 import { FIRST_PARTY_JS, PACKAGE_FILES, sha256 } from './stage-package.js';
 const { createCoverageMap } = coverageLibrary;
 import instrumentLibrary from 'istanbul-lib-instrument';
 const { createInstrumenter } = instrumentLibrary;
+const babelGenerator = createRequire(import.meta.resolve('istanbul-lib-instrument'))('@babel/generator');
 export function counterLayout(metadata) {
     let offset = 1;
     return metadata.map((file) => {
@@ -26,13 +31,100 @@ export function bridgeSource(layout) {
     // Saturate raw signed Int32 counters before storage so hot SHA loops cannot
     // wrap into negative/zero counts. Never repair previously collected evidence.
     // A saturated count is a lower bound, not an exact execution frequency.
-    return `globalThis.__coverage__=new Proxy({}, {set(object,key,file){
+    return `(()=>{const writers=new Map();globalThis.__coverageStatementWriter=path=>{const writer=writers.get(path);if(!writer)throw Error('unregistered coverage statement writer');return writer;};globalThis.__coverage__=new Proxy({}, {set(object,key,file){
 const row=${JSON.stringify(layout)}.find(row=>row.path===key);
 if(!row)throw Error('unexpected coverage file');
 if(JSON.stringify(Object.keys(file.s))!==JSON.stringify(row.keys))throw Error('coverage statement map mismatch');
 Atomics.store(globalThis.__coverageCounters,row.registeredOffset,1);
-for(let i=0;i<row.keys.length;i++){const index=row.offset+i;let latest=Atomics.load(globalThis.__coverageCounters,index);Object.defineProperty(file.s,row.keys[i],{enumerable:true,get(){return latest},set(value){if(!Number.isSafeInteger(value)||value<0)throw Error('coverage counter requires nonnegative safe integer');const bounded=Math.min(value,2147483647);Atomics.store(globalThis.__coverageCounters,index,bounded);latest=bounded}});}
-object[key]=file;return true;}}); Atomics.store(globalThis.__coverageCounters,0,1);`;
+const latest=row.keys.map((_,i)=>Atomics.load(globalThis.__coverageCounters,row.offset+i));
+for(let i=0;i<row.keys.length;i++){const index=row.offset+i;Object.defineProperty(file.s,row.keys[i],{enumerable:true,get(){return latest[i]},set(value){if(!Number.isSafeInteger(value)||value<0)throw Error('coverage counter requires nonnegative safe integer');const bounded=Math.min(value,2147483647);Atomics.store(globalThis.__coverageCounters,index,bounded);latest[i]=bounded}});}
+writers.set(key,(id,prefix)=>{if(!Number.isInteger(id)||id<0||id>=row.keys.length||row.keys[id]!==String(id))throw Error('unsupported coverage statement id');const before=latest[id],value=before+1,bounded=Math.min(value,2147483647);Atomics.store(globalThis.__coverageCounters,row.offset+id,bounded);latest[id]=bounded;return prefix?value:before;});
+object[key]=file;return true;}}); Atomics.store(globalThis.__coverageCounters,0,1);})();`;
+}
+/** Rewrite only the instrumenter's statement updates; unknown shapes fail closed. */
+export function directStatementSource(text, file) {
+    const source = parse(text, { sourceType: 'module' });
+    const coverageNames = new Set();
+    for (const statement of source.program.body)
+        if (babel.isFunctionDeclaration(statement) &&
+            statement.id &&
+            /^cov_[a-zA-Z0-9_]+$/.test(statement.id.name))
+            coverageNames.add(statement.id.name);
+    if (coverageNames.size === 0 &&
+        Object.keys(file.s).length === 0 &&
+        Object.keys(file.f).length === 0 &&
+        Object.keys(file.b).length === 0)
+        return text;
+    if (coverageNames.size !== 1)
+        throw Error('unsupported coverage getter declaration');
+    const name = [...coverageNames][0];
+    const hit = name + '_statementHit';
+    if (text.includes(hit))
+        throw Error('coverage statement writer name collision');
+    const isCoverageCall = (node) => babel.isCallExpression(node) &&
+        babel.isIdentifier(node.callee, { name }) &&
+        node.arguments.length === 0;
+    const isStatements = (node) => babel.isMemberExpression(node) &&
+        !node.computed &&
+        babel.isIdentifier(node.property, { name: 's' }) &&
+        isCoverageCall(node.object);
+    let bootstrap = 0, updates = 0;
+    const visit = (node) => {
+        if (babel.isUpdateExpression(node) &&
+            babel.isMemberExpression(node.argument) &&
+            isStatements(node.argument.object)) {
+            if (node.operator !== '++' ||
+                !node.argument.computed ||
+                !babel.isNumericLiteral(node.argument.property))
+                throw Error('unsupported coverage statement update');
+            const id = String(node.argument.property.value);
+            if (!Object.hasOwn(file.s, id))
+                throw Error('unsupported coverage statement id');
+            updates++;
+            return babel.callExpression(babel.identifier(hit), [
+                babel.numericLiteral(Number(id)),
+                babel.booleanLiteral(node.prefix),
+            ]);
+        }
+        if (isStatements(node))
+            throw Error('unsupported coverage statement access');
+        if (babel.isMemberExpression(node) &&
+            node.computed &&
+            babel.isStringLiteral(node.property, { value: 's' }) &&
+            isCoverageCall(node.object))
+            throw Error('unsupported coverage statement access');
+        if (babel.isMemberExpression(node) &&
+            !node.computed &&
+            babel.isIdentifier(node.property, { name: 's' }) &&
+            babel.isCallExpression(node.object) &&
+            babel.isIdentifier(node.object.callee) &&
+            /^cov_/.test(node.object.callee.name))
+            throw Error('unsupported coverage getter mismatch');
+        for (const key of babel.VISITOR_KEYS[node.type] ?? []) {
+            const child = Reflect.get(node, key);
+            if (Array.isArray(child))
+                Reflect.set(node, key, child.map((item) => babel.isNode(item) ? visit(item) : item));
+            else if (babel.isNode(child))
+                Reflect.set(node, key, visit(child));
+        }
+        return node;
+    };
+    visit(source);
+    source.program.body = source.program.body.flatMap((statement) => {
+        if (!babel.isExpressionStatement(statement) ||
+            !isCoverageCall(statement.expression))
+            return [statement];
+        bootstrap++;
+        return [
+            statement,
+            babel.variableDeclaration('const', [
+                babel.variableDeclarator(babel.identifier(hit), babel.callExpression(babel.memberExpression(babel.identifier('globalThis'), babel.identifier('__coverageStatementWriter')), [babel.stringLiteral(file.path)])),
+            ]),
+        ];
+    });
+    if (bootstrap !== 1 || (Object.keys(file.s).length > 0 && updates === 0))
+        throw Error('unsupported coverage statement bootstrap');
+    return babelGenerator.default(source).code;
 }
 export function mergeRealms(metadata, layout, realms, expectedNames) {
     if (metadata.length !== FIRST_PARTY_JS.length ||
@@ -90,8 +182,9 @@ export async function instrumentPackage({ source, out, }) {
                 coverageGlobalScope: 'globalThis',
                 coverageGlobalScopeFunc: false,
             });
-            const text = instrumenter.instrumentSync(bytes.toString('utf8'), path);
+            const instrumented = instrumenter.instrumentSync(bytes.toString('utf8'), path);
             const file = instrumenter.lastFileCoverage();
+            const text = directStatementSource(instrumented, file);
             metadata.push(file);
             digests.push({
                 path,
@@ -124,7 +217,155 @@ super.postMessage({type:'coverage-bootstrap',target:String(new URL(target,locati
 await import(event.data.target);self.removeEventListener('message',collect);
 for(const data of pending)if(data.type!=='coverage-bootstrap')self.dispatchEvent(new MessageEvent('message',{data}));});`);
     await writeFile(resolve(out, 'coverage-metadata.json'), `${JSON.stringify({ metadata, layout, digests }, null, 2)}\n`);
+    const generation = {
+        version: 1,
+        id: randomUUID(),
+        out: resolve(out),
+        metadataSha256: sha256(JSON.stringify({ metadata, layout, digests })),
+    };
+    await writeFile(resolve(out, 'coverage-playwright-generation.json'), JSON.stringify(generation), { flag: 'wx' });
+    for (const suite of ['package', 'session', 'install']) {
+        await writeFile(resolve(out, `coverage-playwright-node-${suite}.mjs`), `import {closeSync,mkdirSync,openSync,writeFileSync,writeSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname} from 'node:path';
+import {isMainThread} from 'node:worker_threads';
+if(!isMainThread)throw Error('Playwright runner bootstrap cannot replace product Worker wrapper');
+const generation=${JSON.stringify(generation)},suite=${JSON.stringify(suite)};
+if(dirname(fileURLToPath(import.meta.url))!==generation.out)throw Error('Playwright generation output mismatch');
+if(globalThis.__coverageCounters||globalThis.__coverageStatementWriter)throw Error('Playwright runner already bootstrapped');
+const directory=new URL('./coverage-playwright-node/'+suite+'/',import.meta.url);mkdirSync(directory,{recursive:true});
+const identity={...generation,suite,pid:process.pid,ppid:process.ppid};
+{const launch=Buffer.from(JSON.stringify(identity)+'\\n');const ledger=openSync(new URL('launches.jsonl',directory),'a');
+try{if(writeSync(ledger,launch,0,launch.length,null)!==launch.length)throw Error('Playwright launch ledger partial write');}finally{closeSync(ledger);}}
+globalThis.__coverageCounters=new Int32Array(new SharedArrayBuffer(${workerSize}));${bridge}
+writeFileSync(new URL(process.pid+'.begin.json',directory),JSON.stringify(identity),{flag:'wx'});
+let abnormal=false;process.on('uncaughtExceptionMonitor',()=>{abnormal=true;});
+process.on('exit',exitCode=>writeFileSync(new URL(process.pid+'.end.json',directory),JSON.stringify({...identity,exitCode,abnormal,counts:[...globalThis.__coverageCounters]}),{flag:'wx'}));
+`, { flag: 'wx' });
+    }
     return { metadata, layout, digests, bridge };
+}
+/**
+ * Reads one suite's independent launch ledger, written before any receipt, so a
+ * runner that lost both begin and end receipts is still expected.
+ */
+async function readPlaywrightLaunchLedger(folder, generation, suite) {
+    const path = resolve(folder, 'launches.jsonl');
+    const stat = await lstat(path).catch((error) => {
+        throw Error('Playwright launch ledger missing', { cause: error });
+    });
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0)
+        throw Error('Playwright invalid launch ledger file');
+    const text = await readFile(path, 'utf8');
+    if (!text.endsWith('\n'))
+        throw Error('Playwright incomplete launch ledger record');
+    const launches = [];
+    for (const line of text.slice(0, -1).split('\n')) {
+        let record;
+        try {
+            record = JSON.parse(line);
+        }
+        catch (error) {
+            throw Error('Playwright invalid launch ledger record', { cause: error });
+        }
+        const { pid, ppid } = (record ?? {});
+        if (typeof pid !== 'number' ||
+            !Number.isSafeInteger(pid) ||
+            pid <= 0 ||
+            typeof ppid !== 'number' ||
+            !Number.isSafeInteger(ppid) ||
+            ppid <= 0 ||
+            JSON.stringify(record) !== line ||
+            line !== JSON.stringify({ ...generation, suite, pid, ppid }))
+            throw Error('Playwright launch ledger identity mismatch');
+        if (launches.some((launch) => launch.pid === pid))
+            throw Error('Playwright duplicate launch ledger pid');
+        launches.push({ pid, ppid });
+    }
+    return launches;
+}
+/** The same fail-closed reader serves collection preflight and final merging. */
+export async function readPlaywrightNodeRealms(out, expectedSuites) {
+    const allowed = ['package', 'session', 'install'];
+    if (!expectedSuites.length ||
+        new Set(expectedSuites).size !== expectedSuites.length ||
+        expectedSuites.some((suite) => !allowed.includes(suite)))
+        throw Error('invalid Playwright expected suites');
+    for (const name of [
+        'coverage-playwright-generation.json',
+        'coverage-metadata.json',
+    ]) {
+        const stat = await lstat(resolve(out, name));
+        if (!stat.isFile() || stat.isSymbolicLink())
+            throw Error('invalid Playwright generation file');
+    }
+    const generation = JSON.parse(await readFile(resolve(out, 'coverage-playwright-generation.json'), 'utf8'));
+    const metadata = JSON.parse(await readFile(resolve(out, 'coverage-metadata.json'), 'utf8'));
+    if (generation.version !== 1 ||
+        generation.out !== resolve(out) ||
+        typeof generation.id !== 'string' ||
+        generation.metadataSha256 !== sha256(JSON.stringify(metadata)))
+        throw Error('Playwright generation boundary mismatch');
+    const size = createRealm(metadata.layout, 'shape').buffer.byteLength / 4;
+    const directory = resolve(out, 'coverage-playwright-node');
+    if ((await lstat(directory)).isSymbolicLink())
+        throw Error('Playwright registry symlink');
+    const suites = await readdir(directory);
+    if (JSON.stringify([...suites].sort()) !==
+        JSON.stringify([...expectedSuites].sort()))
+        throw Error('Playwright suite registry mismatch');
+    const realms = [];
+    for (const suite of suites) {
+        const folder = resolve(directory, suite);
+        if (!(await lstat(folder)).isDirectory() ||
+            (await lstat(folder)).isSymbolicLink())
+            throw Error('invalid Playwright suite directory');
+        const launches = await readPlaywrightLaunchLedger(folder, generation, suite);
+        const names = await readdir(folder);
+        const required = [
+            'launches.jsonl',
+            ...launches.flatMap(({ pid }) => [
+                `${pid}.begin.json`,
+                `${pid}.end.json`,
+            ]),
+        ].sort();
+        if (JSON.stringify([...names].sort()) !== JSON.stringify(required))
+            throw Error('Playwright missing or extra process receipt');
+        for (const launch of launches) {
+            const name = `${launch.pid}.begin.json`;
+            const endName = `${launch.pid}.end.json`;
+            for (const file of [name, endName])
+                if (!(await lstat(resolve(folder, file))).isFile() ||
+                    (await lstat(resolve(folder, file))).isSymbolicLink())
+                    throw Error('invalid Playwright receipt file');
+            const begin = JSON.parse(await readFile(resolve(folder, name), 'utf8'));
+            const end = JSON.parse(await readFile(resolve(folder, endName), 'utf8'));
+            const { pid, ppid } = launch;
+            const identity = { ...generation, suite, pid, ppid };
+            if (JSON.stringify(begin) !== JSON.stringify(identity))
+                throw Error('Playwright begin identity mismatch');
+            const { exitCode, abnormal, counts, ...endIdentity } = end;
+            if (JSON.stringify(endIdentity) !== JSON.stringify(identity) ||
+                exitCode !== 0 ||
+                abnormal !== false ||
+                !Array.isArray(counts) ||
+                counts.length !== size ||
+                counts[0] !== 1 ||
+                counts.some((value) => !Number.isInteger(value) || value < 0 || value > 2147483647))
+                throw Error('Playwright invalid final receipt');
+            for (const row of metadata.layout) {
+                if (![0, 1].includes(counts[row.registeredOffset]) ||
+                    (counts[row.registeredOffset] === 0 &&
+                        row.keys.some((_, index) => counts[row.offset + index] !== 0)))
+                    throw Error('Playwright unregistered statement counts');
+            }
+            realms.push({
+                name: `playwright:${suite}:${pid}`,
+                buffer: Int32Array.from(counts).buffer,
+            });
+        }
+    }
+    return realms;
 }
 export async function copySharedTestHelpers(root, out) {
     await cp(resolve(root, 'tests/shared'), resolve(out, 'tests/shared'), {
@@ -150,7 +391,7 @@ export async function prepareCoverage({ source, out, root = fileURLToPath(new UR
     });
     await cp(resolve(root, 'scripts/playwright-build-config.js'), resolve(out, 'scripts/playwright-build-config.js'));
     const configPath = resolve(out, 'tests/package/playwright.config.ts');
-    await writeFile(configPath, compiledTestConfig(await readFile(configPath, 'utf8')));
+    await writeFile(configPath, `import '../../coverage-playwright-node-package.mjs';\n${compiledTestConfig(await readFile(configPath, 'utf8'))}`);
     const nodePreload = `import {createRequire,syncBuiltinESMExports} from 'node:module';
 import {writeFileSync} from 'node:fs';
 const realms=[{name:'node-host',buffer:new SharedArrayBuffer(${size})}];
@@ -191,7 +432,7 @@ test.afterEach(async({page},info)=>{const rows=await page.evaluate(()=>globalThi
     await writeFile(consumerPath, consumerText);
     return result;
 }
-export async function reportCoverage({ out, browserResults, candidatePath, session, }) {
+export async function reportCoverage({ out, browserResults, candidatePath, session, runnerSuites = session ? ['package', 'session'] : ['package'], }) {
     const { metadata, layout, digests } = JSON.parse(await readFile(resolve(out, 'coverage-metadata.json'), 'utf8'));
     const candidate = JSON.parse(await readFile(candidatePath, 'utf8'));
     for (const row of digests) {
@@ -213,6 +454,9 @@ export async function reportCoverage({ out, browserResults, candidatePath, sessi
         'node-host',
         ...Array.from({ length: inventory.node.workers }, (_, index) => `node-worker-${index + 1}`),
     ];
+    const runnerRealms = await readPlaywrightNodeRealms(out, runnerSuites);
+    realms.push(...runnerRealms);
+    expected.push(...runnerRealms.map((realm) => realm.name));
     if (nodeRows.length !== inventory.node.workers + inventory.node.host)
         throw new Error('Node planned Worker realms were not all retained');
     if (session) {

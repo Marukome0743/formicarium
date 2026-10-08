@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile, } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { Worker } from 'node:worker_threads';
-import { bridgeSource, counterLayout, createRealm, mergeRealms, } from '../../scripts/package/coverage.js';
-import { FIRST_PARTY_JS } from '../../scripts/package/stage-package.js';
+import { bridgeSource, counterLayout, createRealm, directStatementSource, instrumentPackage, mergeRealms, prepareCoverage, readPlaywrightNodeRealms, } from '../../scripts/package/coverage.js';
+import { FIRST_PARTY_JS, PACKAGE_FILES, } from '../../scripts/package/stage-package.js';
 const { createInstrumenter } = createRequire(import.meta.url)('istanbul-lib-instrument');
 const metadata = FIRST_PARTY_JS.map((path) => {
     const instrumenter = createInstrumenter({ esModules: true });
@@ -17,6 +20,456 @@ const register = (realm) => {
     Atomics.store(new Int32Array(realm.buffer), 0, 1);
     return realm;
 };
+test('generated Playwright configuration initializes a real Node importer and preserves begin/final runner receipts', async () => {
+    await mkdir('.artifacts', { recursive: true });
+    const scratch = await mkdtemp(join(process.cwd(), '.artifacts', 'playwright-node-red-'));
+    const root = join(scratch, 'root'), source = join(scratch, 'source'), out = join(scratch, 'coverage');
+    const put = async (path, text) => {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, text);
+    };
+    try {
+        for (const path of PACKAGE_FILES)
+            await put(join(source, path), path === 'runtime/contracts.js'
+                ? 'export const sampled = 41;\n'
+                : path === 'package.json'
+                    ? '{"type":"module"}'
+                    : '');
+        for (const path of [
+            'tests/shared',
+            'scripts/package',
+            '.artifacts/u1-fixture',
+            'dist/guests',
+        ])
+            await mkdir(join(root, path), { recursive: true });
+        await put(join(root, 'scripts/playwright-build-config.js'), 'export {};');
+        await put(join(root, 'tests/package/playwright.config.ts'), "import './runner-helper.mjs'; export default {testMatch: '**/*.spec.ts'};\n");
+        await put(join(root, 'tests/package/runner-helper.mjs'), "import {sampled} from '../../runtime/contracts.js'; if(sampled!==41)throw Error('fixture import mismatch');\n");
+        for (const spec of [
+            'browser-api.spec.js',
+            'browser-worker.spec.js',
+            'browser-broker.spec.js',
+            'consumer.spec.js',
+        ])
+            await put(join(root, 'tests/package', spec), 'const candidate = {};\nconst guest = {};\n');
+        await put(join(root, 'tests/package/consumer.test.js'), 'const candidate = {};\nconst { createSession } = {};\n');
+        await prepareCoverage({ source, out, root });
+        await put(join(out, 'package.json'), '{"type":"module"}');
+        const env = { ...process.env };
+        delete env.NODE_TEST_CONTEXT;
+        const child = spawn(process.execPath, [join(out, 'tests/package/playwright.config.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+        let stderr = '';
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (text) => {
+            stderr += text;
+        });
+        child.stdout.resume();
+        const [code, signal] = await once(child, 'close');
+        assert.equal(signal, null, stderr);
+        assert.equal(code, 0, `real generated Node collection must initialize writer before static contracts import:\n${stderr}`);
+        const directory = join(out, 'coverage-playwright-node', 'package');
+        const begin = JSON.parse(await readFile(join(directory, `${child.pid}.begin.json`), 'utf8'));
+        const final = JSON.parse(await readFile(join(directory, `${child.pid}.end.json`), 'utf8'));
+        assert.equal(begin.suite, 'package');
+        assert.equal(begin.pid, child.pid);
+        assert.equal(final.suite, begin.suite);
+        assert.equal(final.pid, begin.pid);
+        assert.equal(final.exitCode, 0);
+        assert.equal(final.counts[0], 1);
+        assert.ok(final.counts.some((count, index) => index > 0 && count > 0), 'real instrumented contracts hit must be retained');
+        const retained = await readPlaywrightNodeRealms(out, ['package']);
+        assert.equal(retained.length, 1);
+        assert.deepEqual([...new Int32Array(retained[0].buffer)], final.counts);
+        const worker = spawn(process.execPath, [join(out, 'tests/package/playwright.config.ts')], { env, stdio: 'ignore' });
+        const [workerCode, workerSignal] = await once(worker, 'close');
+        assert.equal(workerCode, 0);
+        assert.equal(workerSignal, null);
+        const withWorker = await readPlaywrightNodeRealms(out, ['package']);
+        assert.equal(withWorker.length, 2, 'separate real runner worker process is retained');
+        assert.notEqual(withWorker[0].name, withWorker[1].name);
+        assert.notEqual(withWorker[0].buffer, withWorker[1].buffer);
+        for (const realm of withWorker)
+            assert.deepEqual([...new Int32Array(realm.buffer)], final.counts);
+        for (const mutation of [
+            { ...final, exitCode: 1 },
+            { ...final, abnormal: true },
+            { ...final, id: 'stale-generation' },
+            { ...final, pid: final.pid + 1 },
+            { ...final, counts: final.counts.slice(1) },
+            {
+                ...final,
+                counts: final.counts.map((count, index) => index === 0 ? 0 : count),
+            },
+            {
+                ...final,
+                counts: final.counts.map((count, index) => index === 2 ? -1 : count),
+            },
+        ]) {
+            await writeFile(join(directory, `${child.pid}.end.json`), JSON.stringify(mutation));
+            await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/);
+        }
+        await writeFile(join(directory, `${child.pid}.end.json`), JSON.stringify(final));
+        await writeFile(join(directory, 'unexpected.json'), '{}');
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/);
+        await rm(join(directory, 'unexpected.json'));
+        const killed = spawn(process.execPath, [
+            '--input-type=module',
+            '-e',
+            `await import(${JSON.stringify(join(out, 'coverage-playwright-node-package.mjs'))});process.kill(process.pid,'SIGKILL');`,
+        ], { env, stdio: 'ignore' });
+        const [, killedSignal] = await once(killed, 'close');
+        assert.equal(killedSignal, 'SIGKILL');
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/);
+        await rm(join(directory, `${killed.pid}.begin.json`));
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package', 'session']), /Playwright/);
+        await assert.rejects(readPlaywrightNodeRealms(out, ['unknown']), /Playwright/);
+        await rm(join(directory, `${child.pid}.end.json`));
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/);
+    }
+    finally {
+        await rm(scratch, { recursive: true, force: true });
+    }
+});
+/** Builds the same minimal package fixture as the real Node importer test above. */
+async function preparePlaywrightNodeFixture(scratch) {
+    const root = join(scratch, 'root'), source = join(scratch, 'source'), out = join(scratch, 'coverage');
+    const put = async (path, text) => {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, text);
+    };
+    for (const path of PACKAGE_FILES)
+        await put(join(source, path), path === 'runtime/contracts.js'
+            ? 'export const sampled = 41;\n'
+            : path === 'package.json'
+                ? '{"type":"module"}'
+                : '');
+    for (const path of [
+        'tests/shared',
+        'scripts/package',
+        '.artifacts/u1-fixture',
+        'dist/guests',
+    ])
+        await mkdir(join(root, path), { recursive: true });
+    await put(join(root, 'scripts/playwright-build-config.js'), 'export {};');
+    await put(join(root, 'tests/package/playwright.config.ts'), "import './runner-helper.mjs'; export default {testMatch: '**/*.spec.ts'};\n");
+    await put(join(root, 'tests/package/runner-helper.mjs'), "import {sampled} from '../../runtime/contracts.js'; if(sampled!==41)throw Error('fixture import mismatch');\n");
+    for (const spec of [
+        'browser-api.spec.js',
+        'browser-worker.spec.js',
+        'browser-broker.spec.js',
+        'consumer.spec.js',
+    ])
+        await put(join(root, 'tests/package', spec), 'const candidate = {};\nconst guest = {};\n');
+    await put(join(root, 'tests/package/consumer.test.js'), 'const candidate = {};\nconst { createSession } = {};\n');
+    await prepareCoverage({ source, out, root });
+    await put(join(out, 'package.json'), '{"type":"module"}');
+    return out;
+}
+/** Spawns synchronously so callers mapping over it start every process at once. */
+async function runNodeProcess(args, env) {
+    const child = spawn(process.execPath, args, {
+        env,
+        stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (text) => {
+        stderr += text;
+    });
+    const [code, signal] = await once(child, 'close');
+    assert.ok(child.pid, `spawned Node process has a pid:\n${stderr}`);
+    return { pid: child.pid, code, signal, stderr };
+}
+test('independent launch ledger matches every concurrent Playwright Node runner and refuses a runner missing both receipts', async () => {
+    await mkdir('.artifacts', { recursive: true });
+    const scratch = await mkdtemp(join(process.cwd(), '.artifacts', 'playwright-ledger-red-'));
+    const stash = join(scratch, 'stash');
+    try {
+        const out = await preparePlaywrightNodeFixture(scratch);
+        await mkdir(stash, { recursive: true });
+        const env = { ...process.env };
+        delete env.NODE_TEST_CONTEXT;
+        const config = join(out, 'tests/package/playwright.config.ts');
+        const runs = await Promise.all(Array.from({ length: 4 }, () => runNodeProcess([config], env)));
+        for (const run of runs) {
+            assert.equal(run.signal, null, run.stderr);
+            assert.equal(run.code, 0, run.stderr);
+        }
+        const pids = runs.map((run) => run.pid);
+        const sortedPids = [...pids].sort((a, b) => a - b);
+        assert.equal(new Set(pids).size, 4, 'four distinct concurrent runners');
+        const directory = join(out, 'coverage-playwright-node', 'package');
+        const ledgerPath = join(directory, 'launches.jsonl');
+        const receipt = (pid, kind) => join(directory, `${pid}.${kind}.json`);
+        const stashed = (pid, kind) => join(stash, `${pid}.${kind}.json`);
+        const finals = new Map();
+        for (const pid of pids)
+            finals.set(pid, JSON.parse(await readFile(receipt(pid, 'end'), 'utf8')));
+        const retained = await readPlaywrightNodeRealms(out, ['package']);
+        assert.equal(retained.length, 4, 'every concurrent runner realm retained');
+        assert.deepEqual(retained.map((realm) => realm.name).sort(), pids.map((pid) => `playwright:package:${pid}`).sort());
+        for (const realm of retained) {
+            const pid = Number(realm.name.split(':')[2]);
+            assert.deepEqual([...new Int32Array(realm.buffer)], finals.get(pid)?.counts, 'raw final counts are preserved per runner');
+        }
+        // Intended RED: a launched runner whose begin and end are both absent.
+        const hidden = pids[0];
+        for (const kind of ['begin', 'end'])
+            await rename(receipt(hidden, kind), stashed(hidden, kind));
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/, 'a launched runner missing both begin and end receipts must be refused');
+        for (const kind of ['begin', 'end'])
+            await rename(stashed(hidden, kind), receipt(hidden, kind));
+        const generation = JSON.parse(await readFile(join(out, 'coverage-playwright-generation.json'), 'utf8'));
+        const record = (pid, change = {}) => JSON.stringify({
+            ...generation,
+            suite: 'package',
+            pid,
+            ppid: process.pid,
+            ...change,
+        });
+        const ledger = await readFile(ledgerPath, 'utf8');
+        assert.ok(ledger.endsWith('\n'), 'ledger ends with a complete record');
+        const lines = ledger.slice(0, -1).split('\n');
+        assert.equal(lines.length, 4, 'one ledger record per launched runner');
+        const ledgerPids = [];
+        for (const line of lines) {
+            const parsed = JSON.parse(line);
+            assert.equal(line, record(parsed.pid), 'each ledger line is one unmixed generation identity record');
+            ledgerPids.push(parsed.pid);
+            const begin = JSON.parse(await readFile(receipt(parsed.pid, 'begin'), 'utf8'));
+            assert.equal(begin.ppid, process.pid, 'begin ppid matches ledger ppid');
+        }
+        assert.deepEqual([...ledgerPids].sort((a, b) => a - b), sortedPids, 'ledger pid set equals the spawned runner pid set');
+        const target = pids[1];
+        const first = JSON.parse(lines[0]);
+        const beginText = await readFile(receipt(target, 'begin'), 'utf8');
+        const restoreLedger = () => writeFile(ledgerPath, ledger);
+        const withFirst = (change) => `${[record(first.pid, change), ...lines.slice(1)].join('\n')}\n`;
+        const refuse = async (label, mutate, restore = restoreLedger) => {
+            await mutate();
+            try {
+                await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/, label);
+            }
+            finally {
+                await restore();
+            }
+        };
+        for (const kind of ['begin', 'end'])
+            await refuse(`${kind} receipt alone missing`, () => rename(receipt(target, kind), stashed(target, kind)), () => rename(stashed(target, kind), receipt(target, kind)));
+        await refuse('ledger missing', () => rename(ledgerPath, join(stash, 'launches.jsonl')), () => rename(join(stash, 'launches.jsonl'), ledgerPath));
+        await refuse('ledger symlink', async () => {
+            await rename(ledgerPath, join(stash, 'launches.jsonl'));
+            await symlink(join(stash, 'launches.jsonl'), ledgerPath);
+        }, async () => {
+            await rm(ledgerPath);
+            await rename(join(stash, 'launches.jsonl'), ledgerPath);
+        });
+        await refuse('ledger empty', () => writeFile(ledgerPath, ''));
+        await refuse('duplicate ledger record', () => writeFile(ledgerPath, `${ledger}${lines[0]}\n`));
+        await refuse('unknown ledger pid without receipts', () => writeFile(ledgerPath, `${ledger}${record(999999)}\n`));
+        await refuse('receipt pair absent from ledger', async () => {
+            await writeFile(receipt(999998, 'begin'), record(999998));
+            await writeFile(receipt(999998, 'end'), JSON.stringify({
+                ...JSON.parse(record(999998)),
+                exitCode: 0,
+                abnormal: false,
+                counts: finals.get(target)?.counts,
+            }));
+        }, async () => {
+            await rm(receipt(999998, 'begin'));
+            await rm(receipt(999998, 'end'));
+        });
+        await refuse('ledger generation id altered', () => writeFile(ledgerPath, withFirst({ id: 'stale-generation' })));
+        await refuse('ledger ppid altered', () => writeFile(ledgerPath, withFirst({ ppid: process.pid + 1 })));
+        await refuse('ledger out altered', () => writeFile(ledgerPath, withFirst({ out: join(scratch, 'other') })));
+        await refuse('ledger metadataSha256 altered', () => writeFile(ledgerPath, withFirst({ metadataSha256: 'f'.repeat(64) })));
+        await refuse('ledger record with extra field', () => writeFile(ledgerPath, withFirst({ extra: true })));
+        await refuse('truncated final ledger line without newline', () => writeFile(ledgerPath, ledger.slice(0, -10)));
+        await refuse('invalid JSON ledger line', () => writeFile(ledgerPath, `${ledger}{"version":1,\n`));
+        await refuse('begin ppid differs from ledger ppid', () => writeFile(receipt(target, 'begin'), JSON.stringify({ ...JSON.parse(beginText), ppid: process.pid + 1 })), () => writeFile(receipt(target, 'begin'), beginText));
+        assert.equal((await readPlaywrightNodeRealms(out, ['package'])).length, 4, 'restored ledger and receipts are accepted again');
+        const killed = await runNodeProcess([
+            '--input-type=module',
+            '-e',
+            `await import(${JSON.stringify(join(out, 'coverage-playwright-node-package.mjs'))});process.kill(process.pid,'SIGKILL');`,
+        ], env);
+        assert.equal(killed.signal, 'SIGKILL');
+        assert.equal(await readFile(ledgerPath, 'utf8'), `${ledger}${record(killed.pid)}\n`, 'killed runner is registered in the ledger before its product import');
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/, 'ledger-registered SIGKILL runner without end receipt');
+        await rm(receipt(killed.pid, 'begin'));
+        await assert.rejects(readPlaywrightNodeRealms(out, ['package']), /Playwright/, 'ledger-registered SIGKILL runner with no receipts at all');
+        await restoreLedger();
+        assert.equal((await readPlaywrightNodeRealms(out, ['package'])).length, 4);
+    }
+    finally {
+        await rm(scratch, { recursive: true, force: true });
+    }
+});
+test('direct generated counter expressions preserve prefix/postfix return values at saturation and reject unsupported shapes', () => {
+    const instrumenter = createInstrumenter({
+        compact: false,
+        coverageGlobalScope: 'globalThis',
+        coverageGlobalScopeFunc: false,
+    });
+    const generated = instrumenter.instrumentSync('globalThis.result = 1;', 'counter-fixture.js');
+    const file = instrumenter.lastFileCoverage();
+    const rows = counterLayout([file]);
+    const name = /function (cov_\w+)\(/.exec(generated)[1];
+    const key = Object.keys(file.s)[0];
+    const appended = generated +
+        `\nglobalThis.step=()=>[${name}().s[${key}]++,++${name}().s[${key}]];`;
+    const run = (text) => {
+        const realm = createRealm(rows, 'counter-fixture');
+        const state = runInNewContext(bridgeSource(rows) +
+            text +
+            `\n({step:globalThis.step,file:globalThis.__coverage__['counter-fixture.js']})`, { __coverageCounters: new Int32Array(realm.buffer) });
+        state.file.s[key] = 2147483647;
+        return JSON.parse(JSON.stringify(state.step()));
+    };
+    assert.deepEqual(run(directStatementSource(appended, file)), run(appended));
+    assert.deepEqual(run(directStatementSource(appended, file)), [2147483647, 2147483648]);
+    for (const expression of [
+        `${name}().s[${key}]--`,
+        `${name}().s[${key}] += 2`,
+        `${name}().s[999999]++`,
+        `${name}().s['${key}']++`,
+        `${name}()['s'][${key}]++`,
+    ])
+        assert.throws(() => directStatementSource(generated + '\n' + expression, file), /unsupported coverage statement/);
+    assert.throws(() => directStatementSource('function cov_wrong(){}', file), /unsupported coverage statement bootstrap/);
+    assert.throws(() => directStatementSource(generated + '\ncov_wrong().s[0]++;', file), /unsupported coverage getter mismatch/);
+    assert.throws(() => runInNewContext(bridgeSource(rows) +
+        "globalThis.__coverageStatementWriter('unknown-file.js')", {
+        __coverageCounters: new Int32Array(createRealm(rows, 'unknown').buffer),
+    }), /unregistered coverage statement writer/);
+});
+test('actual direct instrumented Worker publishes every final hit without sharing realm state', async () => {
+    const instrumenter = createInstrumenter({
+        compact: false,
+        coverageGlobalScope: 'globalThis',
+        coverageGlobalScopeFunc: false,
+    });
+    const raw = instrumenter.instrumentSync('globalThis.work = function(){ for(let i=0;i<32;i++){ globalThis.last=i; } return globalThis.last; };', 'worker-counter.js');
+    const file = instrumenter.lastFileCoverage();
+    const rows = counterLayout([file]);
+    const text = directStatementSource(raw, file);
+    const realm = createRealm(rows, 'direct-worker');
+    const untouched = createRealm(rows, 'separate-host');
+    const control = new SharedArrayBuffer(4);
+    const worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads');
+globalThis.__coverageCounters=new Int32Array(workerData.buffer);
+${bridgeSource(rows)}
+${text}
+parentPort.postMessage({result:globalThis.work(),counts:[...globalThis.__coverageCounters],f:globalThis.__coverage__['worker-counter.js'].f,b:globalThis.__coverage__['worker-counter.js'].b});
+Atomics.wait(new Int32Array(workerData.control),0,0);`, { eval: true, execArgv: [], workerData: { buffer: realm.buffer, control } });
+    try {
+        const [message] = await once(worker, 'message');
+        const expectedRealm = createRealm(rows, 'reference');
+        const expected = runInNewContext(bridgeSource(rows) +
+            raw +
+            `\nglobalThis.work();globalThis.__coverage__['worker-counter.js'];`, { __coverageCounters: new Int32Array(expectedRealm.buffer) });
+        assert.equal(message.result, 31);
+        assert.deepEqual(message.counts, [...new Int32Array(expectedRealm.buffer)]);
+        assert.deepEqual(message.f, JSON.parse(JSON.stringify(expected.f)));
+        assert.deepEqual(message.b, JSON.parse(JSON.stringify(expected.b)));
+        await worker.terminate();
+        assert.deepEqual([...new Int32Array(realm.buffer)], message.counts, 'host retains every published hit after termination');
+        assert.ok([...new Int32Array(untouched.buffer)].every((value) => value === 0), 'independent realm remains untouched');
+    }
+    finally {
+        await worker.terminate();
+    }
+});
+test('actual instrumented statement hits avoid repeated statement property reads while preserving writes and expression semantics', async () => {
+    await mkdir('.artifacts', { recursive: true });
+    const scratch = await mkdtemp(join(process.cwd(), '.artifacts', 'coverage-direct-red-'));
+    const fixturePath = FIRST_PARTY_JS[0];
+    const source = `globalThis.exercise = function(mode) {
+    const order = []; let value = 2;
+    const before = value++; order.push('post:' + before + ':' + value);
+    const after = ++value; order.push('pre:' + after + ':' + value);
+    function choose(flag) { return flag ? value : -value; }
+    try { if (mode === 'throw') throw Error('fixture'); order.push(choose(mode === 'yes')); }
+    catch (error) { order.push(error.message); }
+    finally { order.push('finally'); }
+    return {before, after, value, order};
+  };`;
+    try {
+        for (const path of PACKAGE_FILES) {
+            const target = join(scratch, 'source', path);
+            await mkdir(dirname(target), { recursive: true });
+            await writeFile(target, path === fixturePath ? source : '');
+        }
+        const generated = await instrumentPackage({
+            source: join(scratch, 'source'),
+            out: join(scratch, 'out'),
+        });
+        const actualText = await readFile(join(scratch, 'out', fixturePath), 'utf8');
+        const original = createInstrumenter({
+            esModules: true,
+            compact: false,
+            coverageGlobalScope: 'globalThis',
+            coverageGlobalScopeFunc: false,
+        });
+        const originalText = original.instrumentSync(source, fixturePath);
+        const run = (text, saturated) => {
+            const realm = createRealm(generated.layout, 'fixture');
+            const counters = new Int32Array(realm.buffer);
+            const writes = [];
+            const context = {
+                __coverageCounters: counters,
+                Atomics: {
+                    load: Atomics.load,
+                    store(array, index, value) {
+                        writes.push([index, value]);
+                        return Atomics.store(array, index, value);
+                    },
+                },
+            };
+            const state = runInNewContext(generated.bridge +
+                '\n' +
+                text +
+                '\n({file:globalThis.__coverage__[' +
+                JSON.stringify(fixturePath) +
+                '], exercise:globalThis.exercise})', context);
+            if (saturated)
+                for (const key of Object.keys(state.file.s))
+                    state.file.s[key] = 2147483646;
+            let reads = 0;
+            state.file.s = new Proxy(state.file.s, {
+                get(target, key, receiver) {
+                    if (typeof key === 'string' && /^\d+$/.test(key))
+                        reads++;
+                    return Reflect.get(target, key, receiver);
+                },
+            });
+            const values = ['yes', 'no', 'throw', 'yes'].map((mode) => state.exercise(mode));
+            const executionReads = reads;
+            return {
+                values: JSON.parse(JSON.stringify(values)),
+                writes,
+                counts: [...counters],
+                f: JSON.parse(JSON.stringify(state.file.f)),
+                b: JSON.parse(JSON.stringify(state.file.b)),
+                reads: executionReads,
+            };
+        };
+        for (const saturated of [false, true]) {
+            const expected = run(originalText, saturated);
+            const actual = run(actualText, saturated);
+            assert.ok(expected.reads > 0, 'reference fixture must execute real Istanbul statement increments');
+            assert.deepEqual(actual.values, expected.values, 'prefix/postfix results, order, caught exceptions and finally');
+            assert.deepEqual(actual.writes, expected.writes, 'every Atomic publication including saturation');
+            assert.deepEqual(actual.counts, expected.counts, 'all statement hits and registration');
+            assert.deepEqual(actual.f, expected.f, 'function counts');
+            assert.deepEqual(actual.b, expected.b, 'branch counts');
+            assert.equal(actual.reads, 0, 'direct statement hits must bypass repeated coverage-file statement property access');
+        }
+    }
+    finally {
+        await rm(scratch, { recursive: true, force: true });
+    }
+});
 test('coverage fixed21 inventory includes all unimported files at zero', () => {
     const result = mergeRealms(metadata, layout, [register(createRealm(layout, 'host'))], ['host']);
     assert.equal(result.map.files().length, 21);

@@ -1,8 +1,8 @@
 import { cp, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { prepareCoverage, reportCoverage } from '../package/coverage.js';
 import { consumerInput } from '../../tests/migration-session/consumer-input.js';
+import { prepareCoverage, reportCoverage } from '../package/coverage.js';
 
 /** Additive realm inventory: the original 25 Node Workers and 33 cases remain. */
 export const SESSION_REALMS = Object.freeze({
@@ -116,7 +116,8 @@ test.afterEach(async({page},info)=>{const rows=await page.evaluate(()=>globalThi
   // They reside in the instrumented root and are not part of npm inventory.
   await writeFile(
     resolve(out, 'tests/migration-session/playwright.coverage.config.mjs'),
-    `import {defineConfig,devices} from '@playwright/test';
+    `import '../../coverage-playwright-node-session.mjs';
+import {defineConfig,devices} from '@playwright/test';
 export default defineConfig({testDir:'.',testMatch:'consumer.spec.js',workers:1,retries:0,fullyParallel:false,timeout:840000,forbidOnly:Boolean(process.env.CI),use:{trace:'retain-on-failure'},projects:[{name:'chromium',use:{...devices['Desktop Chrome']}},{name:'firefox',use:{...devices['Desktop Firefox']}},{name:'webkit',use:{...devices['Desktop Safari']}}]});\n`,
     { flag: 'wx' },
   );

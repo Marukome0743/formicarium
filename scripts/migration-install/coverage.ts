@@ -94,7 +94,8 @@ test.afterEach(async({page},info)=>{const rows=await page.evaluate(()=>globalThi
   }
   await writeFile(
     resolve(out, 'tests/migration-install/playwright.coverage.config.mjs'),
-    `import {defineConfig,devices} from '@playwright/test';
+    `import '../../coverage-playwright-node-install.mjs';
+import {defineConfig,devices} from '@playwright/test';
 export default defineConfig({testDir:'.',testMatch:'consumer.spec.js',workers:1,retries:0,fullyParallel:false,timeout:840000,forbidOnly:Boolean(process.env.CI),use:{trace:'retain-on-failure'},projects:[{name:'chromium',use:{...devices['Desktop Chrome']}},{name:'firefox',use:{...devices['Desktop Firefox']}},{name:'webkit',use:{...devices['Desktop Safari']}}]});\n`,
     { flag: 'wx' },
   );
@@ -133,6 +134,7 @@ export async function reportInstallCoverage(
     browserResults,
     candidatePath,
     session: INSTALL_REALMS,
+    runnerSuites: ['package', 'session', 'install'],
   });
 }
 if (

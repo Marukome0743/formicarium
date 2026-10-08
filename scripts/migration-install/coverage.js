@@ -63,7 +63,8 @@ test.afterEach(async({page},info)=>{const rows=await page.evaluate(()=>globalThi
         }
         await writeFile(path, source);
     }
-    await writeFile(resolve(out, 'tests/migration-install/playwright.coverage.config.mjs'), `import {defineConfig,devices} from '@playwright/test';
+    await writeFile(resolve(out, 'tests/migration-install/playwright.coverage.config.mjs'), `import '../../coverage-playwright-node-install.mjs';
+import {defineConfig,devices} from '@playwright/test';
 export default defineConfig({testDir:'.',testMatch:'consumer.spec.js',workers:1,retries:0,fullyParallel:false,timeout:840000,forbidOnly:Boolean(process.env.CI),use:{trace:'retain-on-failure'},projects:[{name:'chromium',use:{...devices['Desktop Chrome']}},{name:'firefox',use:{...devices['Desktop Firefox']}},{name:'webkit',use:{...devices['Desktop Safari']}}]});\n`, { flag: 'wx' });
     await writeFile(resolve(out, 'install-collection-boundary.json'), `${JSON.stringify({ schema: 'migration-install-coverage-boundary', version: 1, unit: 'u3-install', candidateSha256: input.candidate.tarball.sha256, sourceIdentity: input.candidate.sourceIdentity, realInstalledPackage: input.packageRoot, instrumentedPackage: out, combinedFreshRealms: INSTALL_REALMS, originalCompletedU2ProofImported: false }, null, 2)}\n`, { flag: 'wx' });
 }
@@ -84,6 +85,7 @@ export async function reportInstallCoverage(out, browserResults, candidatePath) 
         browserResults,
         candidatePath,
         session: INSTALL_REALMS,
+        runnerSuites: ['package', 'session', 'install'],
     });
 }
 if (process.argv[1] &&
