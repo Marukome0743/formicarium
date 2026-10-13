@@ -1,0 +1,71 @@
+// ブラウザで実行できるゲストと手順の一覧。URL のパラメータはこの一覧と照合してから使う
+// （任意のパスを読み込ませないため。FR4.2、NFR3）。
+// 中身は runtime/registry.js の表から作る（FR4.1）。パスはこのファイルからの相対パスに直して公開する。
+import {
+  GUESTS as GUEST_TABLE,
+  NAME,
+  SESSIONS as SESSION_TABLE,
+} from '../registry.js';
+
+/** このファイルからプロジェクトのルートへの相対パス */
+const FROM_HERE = '../../';
+
+/** ?guest=<name> で選べるゲスト（dist/guests/ のビルド物） */
+export const GUESTS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(GUEST_TABLE).map(([name, guest]) => [
+      name,
+      FROM_HERE + guest.path,
+    ]),
+  ),
+);
+
+/**
+ * ゲストごとの環境変数（runtime/registry.js の env）。Node.js のテストと
+ * scripts/native-baseline.sh も同じ表の値を使う。
+ */
+export const GUEST_ENV = Object.freeze(
+  Object.fromEntries(
+    Object.entries(GUEST_TABLE).map(([name, guest]) => [name, guest.env]),
+  ),
+);
+
+/**
+ * ?session=<name> で選べる手順。project のファイルは cwd の親（projectRoot）以下に置き、
+ * persist のディレクトリをステップの間で引き継ぐ。
+ */
+export const SESSIONS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(SESSION_TABLE).map(([name, session]) => [
+      name,
+      Object.freeze({
+        ...session,
+        script: FROM_HERE + session.script,
+        projectBase: FROM_HERE + session.projectBase,
+        baseline: FROM_HERE + session.baseline,
+      }),
+    ]),
+  ),
+);
+
+/** URL のパラメータを検証して、実行する内容を返す。不正なら Error を投げる。 */
+export function parseRunRequest(searchParams: URLSearchParams) {
+  const flags = searchParams.getAll('core-flag');
+  if (flags.some((flag) => flag !== '-s'))
+    throw new Error('unsupported diagnostic flag');
+  const diagnostic = flags.length ? { coreFlags: flags } : {};
+  const session = searchParams.get('session');
+  if (session !== null) {
+    if (!NAME.test(session) || !Object.hasOwn(SESSIONS, session)) {
+      throw new Error(`unknown session: ${session}`);
+    }
+    return { kind: 'session' as const, name: session, ...diagnostic };
+  }
+  const guest = searchParams.get('guest') ?? 'probe';
+  if (!NAME.test(guest) || !Object.hasOwn(GUESTS, guest)) {
+    throw new Error(`unknown guest: ${guest}`);
+  }
+  const args = searchParams.getAll('arg');
+  if (args.some((a) => a.length > 4096)) throw new Error('argument too long');
+  return { kind: 'guest' as const, name: guest, args, ...diagnostic };
+}

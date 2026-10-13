@@ -16,7 +16,6 @@ import {
 } from '../terrarium/coverage.js';
 import { validatePayloadInventory } from './bundle.js';
 import { bootstrapCoreSource } from './core-source.js';
-import { provisionLatestPlaywright } from './playwright.js';
 import {
   type CheckResult,
   createFreshResultsDirectory,
@@ -238,10 +237,7 @@ export async function runVerification(
     ]),
   );
   await bootstrapCoreSource(root, manifest, command);
-  await command('core-source-provenance', [
-    'bash',
-    'mise-tasks/build/fetch-blink.sh',
-  ]);
+  await command('core-source-provenance', ['bash', 'scripts/fetch-blink.sh']);
   results.push(
     await command('node-regression', [
       node,
@@ -260,7 +256,7 @@ export async function runVerification(
   );
   results.push(
     await command('browser-regression', [
-      bun,
+      node,
       playwright,
       'test',
       'tests/browser/probe.spec.ts',
@@ -279,12 +275,7 @@ export async function runVerification(
     results.push(
       await command(
         session === 'aube-1645' ? 'native-aube' : 'native-pitchfork',
-        [
-          'bash',
-          'mise-tasks/build/native-baseline.sh',
-          session,
-          '--check-reproducible',
-        ],
+        ['bash', 'scripts/native-baseline.sh', session, '--check-reproducible'],
         { native: true },
       ),
     );
@@ -321,8 +312,6 @@ export async function runVerification(
     await command(
       'u1-browser',
       [
-        // Playwright cannot load these compiled coverage specs under Bun 1.4.3.
-        // Node is required here; ordinary browser suites continue to use Bun.
         node,
         playwright,
         'test',
@@ -350,7 +339,6 @@ export async function runVerification(
     tarball: resolve(root, manifest.tarball),
     u1Report: resolve(u1, 'coverage-report.json'),
   });
-  await provisionLatestPlaywright(root, prepared.workspace);
   await provisionPreparedResolver(root, manifest.files, u3);
   await command('coverage-bundle', [
     bun,
@@ -380,7 +368,7 @@ export async function runVerification(
     await command(
       'u3-browser',
       [
-        bun,
+        node,
         resolve(prepared.workspace, 'node_modules/@playwright/test/cli.js'),
         'test',
         '--config',

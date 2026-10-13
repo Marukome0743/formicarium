@@ -2,7 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { TestContext } from 'node:test';
-import { PACKAGE_FILES, sha256 } from '../../scripts/package/stage-package.js';
+import {
+  HISTORICAL_PACKAGE_FILES,
+  sha256,
+} from '../../scripts/release/inventory.js';
 import {
   ADOPTION_CHECKS,
   DIFF_CHECKS,
@@ -15,6 +18,7 @@ import type {
   PublicationIdentity,
   PublicationRequest,
 } from '../../scripts/release/publication.js';
+import type { PublicationExecutor } from '../../scripts/release/publication-cli.js';
 import { approval, check, coverageFixture, fixture } from './fixtures.js';
 import { publicationBoundaryFixture } from './publication-boundary-fixture.js';
 
@@ -27,7 +31,10 @@ const identity: PublicationIdentity = {
   tag: 'v0.1.0-rc.1',
   distTag: 'next',
 };
-export async function bundle(t: TestContext) {
+export async function bundle(
+  t: TestContext,
+  packageFiles: readonly string[] = HISTORICAL_PACKAGE_FILES,
+) {
   const f = await fixture(t, [...RC_CHECKS, ...REGRESSION_CHECKS]);
   const root = f.root;
   t.after(() => rm(`${root}.empty-npmrc`, { force: true }));
@@ -54,7 +61,7 @@ export async function bundle(t: TestContext) {
   t.after(() => setEnvironment(previous));
   const core = { blinkCommit: 'c'.repeat(40), blinkSourceDirty: false };
   const files: { path: string; sha256: string }[] = [];
-  for (const path of PACKAGE_FILES) {
+  for (const path of packageFiles) {
     const manifest = {
       name: '@aletheia-works/formicarium',
       version: identity.version,
@@ -96,7 +103,7 @@ export async function bundle(t: TestContext) {
       tarball,
       '-C',
       root,
-      ...PACKAGE_FILES.map((path) => `package/${path}`),
+      ...packageFiles.map((path) => `package/${path}`),
     ]);
   pack();
   const digest = sha256(await readFile(tarball));
@@ -183,7 +190,25 @@ export async function bundle(t: TestContext) {
     await writeFile(join(root, 'publication.json'), JSON.stringify(candidate));
   };
   const boundary = await publicationBoundaryFixture(root, request);
+  const npmCli = join(root, 'npm/package/bin/npm-cli.js');
+  await mkdir(dirname(npmCli), { recursive: true });
+  await writeFile(
+    join(root, 'npm/package/package.json'),
+    JSON.stringify({ version: '11.19.0' }),
+  );
+  await writeFile(npmCli, '// passive fake executor fixture');
+  const previousNpmCli = process.env.FORMICARIUM_NPM_CLI;
+  setEnvironment({ FORMICARIUM_NPM_CLI: npmCli });
+  t.after(() => setEnvironment({ FORMICARIUM_NPM_CLI: previousNpmCli }));
   await save();
+  const calls: {
+    executable: string;
+    args: string[];
+    options: Parameters<PublicationExecutor>[2];
+  }[] = [];
+  const executor: PublicationExecutor = (executable, args, options) => {
+    calls.push({ executable, args: [...args], options });
+  };
   return {
     ...f,
     request,
@@ -193,7 +218,10 @@ export async function bundle(t: TestContext) {
     pack,
     save,
     core,
+    calls,
+    executor,
     boundary,
+    npmCli,
     setEnvironment,
   };
 }
@@ -253,7 +281,7 @@ export async function stableBundle(t: TestContext) {
     stableCandidateId: c.candidateId,
     stableTarballSha256: c.tarballSha256,
     changed: ['package.json'],
-    unchanged: PACKAGE_FILES.filter((path) => path !== 'package.json'),
+    unchanged: HISTORICAL_PACKAGE_FILES.filter((path) => path !== 'package.json'),
   });
   await writeFile(join(f.root, 'stable.diff.json'), diff);
   const diffCheck = e.checks.find((row) => row.checkId === 'stable-diff')!;

@@ -10,7 +10,11 @@ import {
   resolveEvidence,
   unique,
 } from './evidence.ts';
-import { PACKAGE_FILES, sha256 } from './inventory.ts';
+import {
+  HISTORICAL_PACKAGE_FILES,
+  PACKAGE_FILES,
+  sha256,
+} from './inventory.ts';
 import { ASSET_LIMITS, readBoundedFile } from './publication-assets.ts';
 import type { CandidateIdentity, ReleaseApproval } from './types.ts';
 import { publicationChannel } from './version.ts';
@@ -78,7 +82,7 @@ export function validatePublicationIdentity(i: PublicationIdentity) {
   );
   return i;
 }
-function members(tarball: string) {
+function members(tarball: string, allowHistorical = false) {
   const rows = execFileSync('tar', ['-tzvf', tarball], { encoding: 'utf8' })
     .trim()
     .split('\n');
@@ -102,7 +106,10 @@ function members(tarball: string) {
   unique(inventory, 'archive path');
   requireCondition(
     JSON.stringify([...inventory].sort()) ===
-      JSON.stringify([...PACKAGE_FILES].sort()),
+      JSON.stringify([...PACKAGE_FILES].sort()) ||
+      (allowHistorical &&
+        JSON.stringify([...inventory].sort()) ===
+          JSON.stringify([...HISTORICAL_PACKAGE_FILES].sort())),
     'archive inventory differs',
   );
   return inventory;
@@ -251,7 +258,7 @@ export async function validatePublication(
       JSON.stringify(candidate.identity) === JSON.stringify(identity),
     'publication candidate identity differs',
   );
-  const inventory = members(tarballPath);
+  const inventory = members(tarballPath, true);
   requireCondition(
     candidate.files.length === inventory.length,
     'publication files differ',

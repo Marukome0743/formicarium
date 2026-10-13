@@ -54,14 +54,13 @@ export async function publicationBoundaryFixture(
   request: PublicationRequest,
 ): Promise<PublicationBoundary> {
   const policy = JSON.parse(
-    await readFile('scripts/release/publication-policy.json', 'utf8'),
+    await readFile('.github/publication/trusted-policy.json', 'utf8'),
   );
-  policy.writerEnabled = true;
   policy.evidence.workflowId = 11;
   policy.evidence.producerAppId = 22;
-  await mkdir(join(root, 'scripts/release'), { recursive: true });
+  await mkdir(join(root, '.github/publication'), { recursive: true });
   await writeFile(
-    join(root, 'scripts/release/publication-policy.json'),
+    join(root, '.github/publication/trusted-policy.json'),
     JSON.stringify(policy),
   );
   request.candidateRun = { runId: 123, runAttempt: 1, artifactId: 66 };
@@ -100,10 +99,6 @@ export async function publicationBoundaryFixture(
     const archive = zip([
       ['ci-results/acceptance.json', acceptance],
       ['ci-coverage-fixed24/report.json', reportBytes],
-      [
-        'ci-coverage-fixed24/inventory.json',
-        await readFile(join(root, 'inventory.json')),
-      ],
     ]);
     const url = String(input),
       prefix = `https://api.github.com/repos/${request.identity.repository}`;

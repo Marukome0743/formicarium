@@ -19,7 +19,6 @@
   },
   "include": [
     "runtime/**/*.ts",
-    "web/**/*.ts",
     "scripts/**/*.ts",
     "integration/**/*.ts",
     "playwright.config.ts",

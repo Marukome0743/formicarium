@@ -68,5 +68,5 @@ export function probeUrl(args: string[] = []) {
     query.append('core-flag', '-s');
     query.append('arg', '--diagnostic');
   }
-  return `/web/index.html?${query}`;
+  return `/runtime/web/index.html?${query}`;
 }

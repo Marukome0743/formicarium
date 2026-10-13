@@ -42,6 +42,38 @@ Default assets resolve relative to the installed package. Explicit `assets` requ
 
 ## この PoC でしていること
 
+### terrarium 移管の guest/session API（U2 暫定候補）
+
+移管用の候補は staging 内だけで `0.3.0` を使います。root の版、公開タグ、npm 公開状態は変更しません。公開済み `0.2.1` と比較した Node/browser の配布 JS と型は移管変更前に一致しましたが、ローカルの core assets は Emscripten 版が異なり byte 同一ではありません。新候補の pack と実行結果を個別に検証します。
+
+```js
+import { createSession } from '@aletheia-works/formicarium/node';
+import {
+  validateGuest, fixtureToFsEntries, runValidatedGuest,
+  registerValidatedGuest, decodeUtf8,
+} from '@aletheia-works/formicarium';
+
+// expected は呼出し元の固定カタログから渡す。
+// { elfSha256, buildInfoSha256, identity: GuestBuildInfo }
+const guest = validateGuest(guestBytes, expected);
+const entries = fixtureToFsEntries([
+  { path: '/work/input', type: 'file', mode: 0o644,
+    inodeId: 'input', data: new TextEncoder().encode('example') },
+]);
+const session = await createSession({ entries });
+try {
+  await registerValidatedGuest(session, 'tool', guest);
+  const result = await runValidatedGuest(session, guest, { args: ['--version'] });
+  console.log(result.exitCode, decodeUtf8(result.stdout));
+} finally { await session.dispose(); }
+```
+
+`validateGuest` と `fixtureToFsEntries` は同期です。guest は static ELF64 little-endian x86-64 Linux、最大 128 MiB、canonical build metadata は最大 1 MiB。fixture は最大 4096 entries・合計 256 MiB・UTF-8 path 4096 bytes で、root 逸脱、symlink loop、矛盾する hardlink を拒否します。guest/metadata/fixture bytes を内部へ copy し、以後の入力変更は実行に反映しません。handle の複製や別 package instance で作った handle は `INVALID_INPUT` です。
+
+run・登録・FS 操作は session ごとに同じ排他を使い、競合は `BUSY` です。`reset()` は実行を取り消して cleanup を待ち、登録・FS・cwd を初期状態へ戻します。`dispose()` は cleanup 後に終端となり、以後は `DISPOSED` です。取消は `ABORTED`、guest 非ゼロ exit は従来どおり結果へ返します。内部の予約 API は package exports に公開しません。登録した名前からの command、取得・install は後続単位です。
+
+Node >=24、ブラウザの COOP/COEP・同一 origin Worker/assets・CSP の要件は上記と同じです。U2 の新 pack は Node と Chromium/Firefox/WebKit で実試験済みですが、最終 coverage、統合前 CI、実機 Safari はこの追加時点で未検証です。共通検証コマンドは実入力を示した後に別途承認します。
+
 [jart/blink](https://github.com/jart/blink)（x86-64 Linux のユーザーモードエミュレータ）の fork
 [aletheia-works/blink](https://github.com/aletheia-works/blink)（`formicarium-wasm` ブランチ）を
 Emscripten で wasm にビルドし（インタプリタのみ、JIT なし）、static-musl の x86-64 バイナリを
@@ -72,8 +104,7 @@ Node.js の Worker と、COOP/COEP 付きのブラウザページ（Chromium・F
 | コアの記述子 | `runtime/core.js` | ここだけがコアを知る（ビルド物の場所、コマンドラインの組み立て方） |
 | 入出力の共通部 | `runtime/guest-io.js`、`runtime/session.js` | なし（Emscripten の FS API だけを使う） |
 | Node.js の実行環境 | `runtime/node/` | なし |
-| 配布用ブラウザAPI | `runtime/web/` | なし |
-| 検証用Web UI | `web/`、`scripts/serve.js` | なし |
+| ブラウザの実行環境 | `runtime/web/`、`scripts/serve.js` | なし |
 | コア（blink の fork） | `blink.lock` → `.vendor/blink` → `dist/blink/` | — |
 
 置き換えるときは、`runtime/core.ts` に paludarium の記述子を足し、`dist/` にそのビルド物を置く。
@@ -82,12 +113,12 @@ Node.js の Worker と、COOP/COEP 付きのブラウザページ（Chromium・F
 
 | ツール | 用途 | 入手 |
 |---|---|---|
-| Bun latest | 開発依存の固定導入、開発task | `mise.toml`（`mise install`） |
-| Node.js latest | ランナー、consumer、Worker、テスト、計測 | `mise.toml`（`mise install`）。公開packageの対応範囲はNode >=24 |
+| Bun 1.4.2 | 開発依存の固定導入、開発task | `mise.toml`（`mise install`） |
+| Node.js 24.21.0 | ランナー、consumer、Worker、テスト、計測 | `mise.toml`（`mise install`）。公開packageの対応範囲はNode >=24 |
 | Docker Desktop または wslc | blink の wasm ビルド、ゲストのビルド、native の基準値 | wslc（`C:\Program Files\WSL\wslc.exe`）を優先し、動かなければ docker を使う。`FORMICARIUM_CONTAINER` で指定もできる |
 | emsdk | ローカルでの Emscripten（`FORMICARIUM_BUILD=host` のとき） | `~/AppData/Local/emsdk`（Windows）または `~/emsdk`。`git clone https://github.com/emscripten-core/emsdk && ./emsdk install latest && ./emsdk activate latest` |
 | Git、Git Bash | スクリプトの実行（Windows） | — |
-| Playwright のブラウザ | ブラウザのテストと計測 | `mise run install-frozen` → `bun node_modules/@playwright/test/cli.js install chromium firefox webkit` |
+| Playwright のブラウザ | ブラウザのテストと計測 | `mise run install-frozen` → `node node_modules/@playwright/test/cli.js install chromium firefox webkit` |
 
 Windows では、mise のツールは非対話シェルの PATH に載らない。`~/AppData/Local/mise/installs/<tool>/<version>/` の実体を直接呼ぶ。
 
@@ -100,11 +131,11 @@ blink の wasm ビルドは、既定ではコンテナ（`emscripten/emsdk:<ロ�
 
 ### 通常CIと候補検証
 
-`ci.yml`は全PRとmain pushで`quality`（30分）、`product-build`（各140分）、`product-regression`（各90分）、`product-tests`（集約5分）、`commit-format`（10分）、`ci-required`（5分）を実行する。品質taskはfrozen導入→lint→typecheck→build→Bun中心の軽量検査とNode固有検査の順。通常CIはcontents readだけを使い、checkout credentialを保存しない。製品ビルドはwasm・probe・aube/pitchforkの3ジョブ、回帰試験はNode・3ブラウザの4ジョブへ分割する。コンパイラimageと入力が同じ場合に個別成果物cacheを使い、cache missでもビルドと検査を実行する。native検査と全回帰試験はcache hitでも省略しない。cross-repository consumerと配布coverageはcandidate検証で別途確認する。
+`ci.yml`は全PRとmain pushで`quality`（30分）、`commit-format`（10分）、`ci-required`（5分）を実行する。品質taskはfrozen導入→lint→typecheck→build→軽量Node検査の順。通常CIはcontents readだけを使い、checkout credentialを保存しない。OS/Bun/Node/lock digestで依存cacheを分け、cache missでも検査を実行する。通常CI成功は重い回帰や配布coverageの成功を意味しない。
 
 commit形式は信頼済みbaseの`scripts/ci/commit-format.ts`で検査する。導入前mainにこのvalidatorがない初回は安全側で失敗する。初期導入の手順は管理者がレビューと外部操作の承認後に決め、PR側validatorへのfallbackやcheck除外で回避しない。既存の`verify.yml`と`publish.yml`、公開RCと固定RC入力branchは保持する。
 
-候補SHAの回帰は`candidate-verify.yml`のworkflow_dispatchで実行する（`candidate-required`、360分）。既存の登録済み`verify.yml`も同じ手順の互換入口として維持する。初回の通常CIでは、baseが移行前の固定SHA `12a92eabf70f6772f11e33f698e3db5088992270` の場合だけ、検証済みSHA `7fc23afedef9a2296cb24026c0f19998a6933da7` のcommit形式検査を使用する。以後はtrusted baseの検査を使用し、PRから検査コードを選ばない。事前にmain担当者が、そのSHAから新しいtarball/siteを生成し、変更のないcore/guestとprovenance/native baselineを照合して入力bundleを作る。`candidateSourcePaths(root)`が列挙した第一者source全てを`bundle.ts`の`sourcePaths`へ渡し、schemaVersion1 manifestとpayload inventoryを固定する。新sourceへ旧RCの検証結果を転用しない。
+候補SHAの回帰は`candidate-verify.yml`のworkflow_dispatchで実行する（`candidate-required`、360分）。事前にmain担当者が、そのSHAから新しいtarball/siteを生成し、変更のないcore/guestとprovenance/native baselineを照合して入力bundleを作る。`candidateSourcePaths(root)`が列挙した第一者source全てを`bundle.ts`の`sourcePaths`へ渡し、schemaVersion1 manifestとpayload inventoryを固定する。新sourceへ旧RCの検証結果を転用しない。
 
 承認後、管理者は新しい固定commitのHTTPS raw URLを`FORMICARIUM_MODERNIZATION_INPUT_URL`、archive SHA256を`FORMICARIUM_MODERNIZATION_INPUT_SHA256`へ設定する。旧`FORMICARIUM_CI_INPUT_*`は変更しない。入力不足、未知member、symlink、digest/source/provenance不一致は試験前に拒否する。準備した入力と環境があれば`mise run verify-candidate`も同じ入口を使う。未変更guestは再ビルドしない。
 
@@ -114,11 +145,11 @@ commit形式は信頼済みbaseの`scripts/ci/commit-format.ts`で検査する�
 
 | 論理task | mise入口 | Bun scripts | 実行境界 |
 |---|---|---|---|
-| install-frozen | `mise run install-frozen` | `bun run install:frozen` | Bun latest、frozen、script無効 |
+| install-frozen | `mise run install-frozen` | `bun run install:frozen` | Bun固定版、frozen、script無効 |
 | lint | `mise run check` | `bun run check` | Biome |
 | typecheck | `mise run typecheck` | `bun run typecheck` | TypeScript |
-| build | `mise run build` | `bun run build` | tscとBun emitter |
-| test-light | `mise run test-light` | `bun run test:light` | Bun unit/tooling＋Node consumer/publication |
+| build | `mise run build` | `bun run build` | tscとNode emitter |
+| test-light | `mise run test-light` | `bun run test:light` | Node node:test |
 | test-consumer | `mise run test-consumer` | `bun run test:consumer` | Node consumer、別途資産準備 |
 | verify-candidate | `mise run verify-candidate` | `bun run verify:candidate` | Node/browser/nativeと固定80%coverage |
 
@@ -137,33 +168,34 @@ bun run check:fix    # Biome の安全な自動修正
 
 Windows では POSIX permission bits の検査だけを skip する。同じ検査を Linux で実行することで権限の条件を確認する。外部の実配布資産に関するテストも、資産を未準備のときは未検証として表示する。
 
-`mise run test-consumer` は wasm・guest・検証済みの npm アーカイブ・独立した consumer を使うため、各テストの資産と環境変数を準備してから実行する。Playwright は `.spec.ts` を読み、3 ブラウザ・1 worker・再試行なしを維持する。失敗時には trace と screenshot を保存する。開発依存はtext `bun.lock`をコミットし、frozen導入でlockの変更を拒否する。導入scriptは全て無効化し、`trustedDependencies: []`でBunの既定許可にも頼らない。cacheなし確認は`bun scripts/ci/tasks.ts install-frozen --cacheless`で実行する。Node向けconsumer・Worker・固有flagsをBun runtimeへ置換しない。
+`mise run test-consumer` は wasm・guest・検証済みの npm アーカイブ・独立した consumer を使うため、各テストの資産と環境変数を準備してから実行する。Playwright は `.spec.ts` を読み、3 ブラウザ・1 worker・再試行なしを維持する。失敗時には trace と screenshot を保存する。開発依存はtext `bun.lock`をコミットし、frozen導入でlockの変更を拒否する。導入scriptは全て無効化し、`trustedDependencies: []`でBunの既定許可にも頼らない。cacheなし確認は`node scripts/ci/tasks.ts install-frozen --cacheless`で実行する。Node向けconsumer・Worker・固有flagsをBun runtimeへ置換しない。
 
 ```bash
 mise run install-frozen
 mise run build                   # TypeScript を JavaScript にコンパイルする
-mise run build-blink-wasm   # blink.lock のコミットを取得し、dist/blink/blink.mjs と blink.wasm を作る
-mise run build-guests       # dist/guests/ に probe・hello・exit3・aube（v2.6.1）・pitchfork（v2.30.1）を作る（aube は 1 時間以上かかる）
-mise run native-baseline    # fixtures/baseline/aube-1645.native.txt（native の基準値）を作る
-mise run native-baseline pitchfork-basic --check-reproducible   # pitchfork の基準値（2 回作って一致を確かめる）
-bun node_modules/@playwright/test/cli.js install chromium firefox webkit
+bash scripts/build-blink-wasm.sh   # blink.lock のコミットを取得し、dist/blink/blink.mjs と blink.wasm を作る
+bash scripts/build-guests.sh       # dist/guests/ に probe・hello・exit3・aube（v2.6.1）・pitchfork（v2.29.0）を作る（aube は 1 時間以上かかる）
+bash scripts/native-baseline.sh    # fixtures/baseline/aube-1645.native.txt（native の基準値）を作る
+bash scripts/native-baseline.sh pitchfork-basic --check-reproducible   # pitchfork の基準値（2 回作って一致を確かめる）
+node node_modules/@playwright/test/cli.js install chromium firefox webkit
 ```
 
-`mise run fetch-blink` は `blink.lock` のコミットだけを `.vendor/blink` に取得する。fork と upstream の差分は
+`bash scripts/fetch-blink.sh` は `blink.lock` のコミットだけを `.vendor/blink` に取得する。fork と upstream の差分は
 `git -C .vendor/blink diff <upstream_commit> <commit>`（値は `blink.lock`）で一覧できる。
 
-- probe だけを作り直すときは `mise run build-guests probe`（1 分ほど）。aube は入力が変わらない限り作り直さなくてよい。
-- pitchfork だけを作るときは `mise run build-guests pitchfork`（初回は 35 分ほど）。公式リポジトリ（jdx/pitchfork）の
-  タグ `v2.30.1` を取得し、コミットを `dist/guests/pitchfork.commit` に記録する（`PITCHFORK_REF` で変えられる）。
+- probe だけを作り直すときは `bash scripts/build-guests.sh probe`（1 分ほど）。aube は入力が変わらない限り作り直さなくてよい。
+- pitchfork だけを作るときは `bash scripts/build-guests.sh pitchfork`（初回は 35 分ほど）。公式リポジトリ（jdx/pitchfork）の
+  タグ `v2.29.0` を取得し、コミットを `dist/guests/pitchfork.commit` に記録する（`PITCHFORK_REF` で変えられる）。
   - release ビルドは web UI を埋め込むので、先に `ui/` を `dist/guests/aube` で `aube install --frozen-lockfile && aube run build`
-    する。上流UIのNode実行には公式 `node:current-alpine` の最新系列を使う（`PITCHFORK_UI_NODE_IMAGE`で変更可能）
-  - 上流ソースを修正せずにビルドする。ソース変更が残るキャッシュは拒否する
-  - UI に使った node の版と UI 成果物の sha256 を `dist/guests/pitchfork.build-info` に記録する
+    する。UI に使う node はメジャー版 24 に固定し（`PITCHFORK_UI_NODE_MAJOR`）、違う版が入ったら止まる
+  - v2.29.0 は musl 向けにそのままではコンパイルできないので、型だけを合わせる 1 行のパッチ
+    `patches/pitchfork-2.29.0-musl-ioctl.patch` を当てる（動作は変わらない）
+  - 当てたパッチの sha256、UI に使った node の版、UI の成果物の sha256 を `dist/guests/pitchfork.build-info` に記録する
   ビルド後、`dist/guests/` のすべてのゲストが static な x86-64 の ELF であること（`PT_INTERP` がないこと）を確かめる。
 - ゲスト・環境変数・手順の一覧は `runtime/registry.ts` の 1 か所にある。ゲストを足すときは、そこに 1 行足し、
   `build-guests.sh` の対象・fixture・基準値・テストを足す（[`docs/terrarium-integration.md`](docs/terrarium-integration.md) の 3 節）。
-- `mise run native-baseline [<手順>] [--check-reproducible]` は、表の手順（既定は `aube-1645`）の基準値を作る。
-  手順の設定は `bun scripts/session-info.js <手順>` で表から読む（シェル補助はBunを優先し、必要時はNodeを使う）。
+- `bash scripts/native-baseline.sh [<手順>] [--check-reproducible]` は、表の手順（既定は `aube-1645`）の基準値を作る。
+  手順の設定は `node scripts/session-info.js <手順>` で表から読む（node は PATH、`FORMICARIUM_NODE`、mise の順に探す）。
 - wasm メモリの上限は 1 GB（`-sMAXIMUM_MEMORY=1GB`）。WebKit がインスタンスごとに上限までメモリを確保するため、
   4 GB から下げた。1 GB を超えるメモリを使うゲストは動かない。
 - `dist/blink/build-info.json` の `blinkSourceDirty` が `true` のビルド（未公開の修正を含む）では、
@@ -172,42 +204,62 @@ bun node_modules/@playwright/test/cli.js install chromium firefox webkit
 ### fork を直すとき
 
 1. `.vendor/blink-src`（fork のコピー）で修正する。この PoC では jj で管理している。
-2. `BLINK_SRC=.vendor/blink-src mise run build-blink-wasm` でビルドして試す（通常の取得経路は `checkout --force` と
+2. `BLINK_SRC=.vendor/blink-src bash scripts/build-blink-wasm.sh` でビルドして試す（通常の取得経路は `checkout --force` と
    clean を呼ぶので、ローカルの修正には使わない）。
 3. 修正を新しいコミットにして `formicarium-wasm` に push し、`blink.lock` の `commit=` を更新する。
    公開済みのコミットに変更が混ざらないように注意する（jj は作業中の変更を今のコミットに取り込むため、先に `jj new` しておく）。
-4. `mise run fetch-blink` と `mise run build-blink-wasm` でクリーンビルドし、全テストを実行する。
+4. `bash scripts/fetch-blink.sh` と `bash scripts/build-blink-wasm.sh` でクリーンビルドし、全テストを実行する。
 5. レビュー用に、差分の写しを `patches/` に置く。
 
 ## 保守 workflow
 
-共通の保守は terrarium / vivarium と同じ GitHub Actions の構成を使います。
+通常 CI の成功後に `maintenance.yml` が独立した API 観測と整形・依存更新の再現を行います。
+整形 push と依存更新の squash merge は別の GitHub App を使用し、直前の head と
+`quality`・`commit-format`・`ci-required` を再確認します。書込みは head 条件付きで 1 回だけ行い、
+結果が不明な場合は読取りで照合します。自動再送はしません。失敗した lint を整形で迂回しません。
 
-- `dependabot-auto-merge.yml`: `dependabot/fetch-metadata` で更新内容を読み、major 以外の更新は `gh pr merge --auto --squash` で予約します。main の required checks が成功し、branch protection の条件を満たしてから GitHub が統合します。major 更新は自動統合しません。
-- `lint-autofix.yml` / `lint-autofix-apply.yml`: 権限なしで Biome の修正 patch を作り、別 job が許可された既存ファイルの差分だけを確認して適用します。head が変わっていれば適用しません。適用先は同じ repository の PR に限ります。
-- `labeler.yml` / `.github/labeler.yml`: `actions/labeler` によるファイル分類と、既存 repository と同じ Conventional Commits の type label を使います。
-- `assign.yml`、`dependency-review.yml`、`commitlint.yml`: 担当者の設定、依存更新のレビュー、共有 commitlint workflow を既存 repository と同じ構成で使います。
+初期設定は `.github/maintenance/policy.json` の `writerEnabled: false` です。
+有効化には独立確認した workflow・producer App・更新 Bot の数値 ID、workflow/config digest、
+artifact の許可 redirect host、main の保護設定が必要です。`MAINTENANCE_ENABLED` も設定してください。
+`FORMAT_APP_CLIENT_ID` / `FORMAT_APP_PRIVATE_KEY` と `MERGE_APP_CLIENT_ID` / `MERGE_APP_PRIVATE_KEY` は
+用途別に登録し、対象 repository だけへ権限を限定します。保護情報を読めない場合も処理を拒否します。
+prepare は `MAINTENANCE_READ_APP_CLIENT_ID` / `MAINTENANCE_READ_APP_PRIVATE_KEY` の専用 App を使い、
+contents・actions・checks・pull-requests・administration を read のみに限定します。信頼済みツールの導入後に
+対象 repository 専用 token を取得し、保護 API を Administration read のない GITHUB_TOKEN で代替しません。
+秘密鍵は token Action だけへ渡し、token は親の API 取得だけで使用します。隔離した再現 child の環境は
+PATH/HOME/TMPDIR/CI/cache の許可項目だけで組み立て、token・秘密鍵を渡しません。format App は保護 API を
+呼ばないため Administration を追加せず、保護を再確認する merge App は Administration read が必要です。
+これらの外部設定は、この実装では実施していません。
 
-Bun 1.4.2 / bun.lock による依存管理、固定 Node、`ci.yml` の lint・型検査・build・軽量試験、候補回帰・coverage・公開前検査は formicarium 固有の検証として維持します。
-整形の適用には既存の repository secret `TF_TOKEN_GITHUB` を使います。Dependabot の auto-merge は `GITHUB_TOKEN` を使います。
-整形 patch は workflow・依存定義・lockfile・tool設定を変更できず、PR のコードを privileged job で実行しません。
-独自の TypeScript 保守 runner、producer ID の登録、保守用 policy、`MAINTENANCE_ENABLED` は不要です。
+書込み job は trusted base にある Node 用 bundle を実行し、PR のコードや install script を実行しません。
+bundle 更新時は固定 Bun で次を実行し、source と bundle の再生成一致を確認してください。
 
-## 将来の RC / stable 公開
+```bash
+bun build scripts/maintenance/runner.ts --target=node --format=esm --packages=bundle --outfile=.github/maintenance/runner.mjs
+biome check --write --config-path=biome.json .github/maintenance/runner.mjs
+```
+
+### 将来の RC / stable 公開
 
 `publish.yml` は `v*` tag を入口とし、実行時に `X.Y.Z-rc.N`（N は正整数）または `X.Y.Z` の厳密な版、tag、source SHA、公開先、版ごとの人の承認を照合します。RC は `next`、stable は `latest` を使います。stable は同じ基底版の公開 RC の受け入れ証拠と差分検査も必要です。既存 `v0.1.0-rc.1` と `codex/release/rc1-inputs` は履歴の固定入力として保持します。上の U1 導入時の workflow 保持記述に対し、この U4 で `publish.yml` の将来版対応を追加しています。
 
-readonly verify job は Bun latest と `bun.lock` で依存を導入し、TypeScript の公開前検査を直接実行します。公開候補は通常 CI と別に `candidate-verify.yml` の `candidate-required`、9 個の必須検査、固定 inventory の全 realm receipt と 80% coverage を要求します。GitHub API の run/attempt/source/workflow/producer、artifact digest、report bytes を独立照合し、skip・missing・非成功を拒否します。stable の公開 RC 受入れと差分検査も維持します。
+readonly verify job は Bun 1.4.2 と `bun.lock` で導入・ビルドし、固定生成済み Node runner の再現を確認します。公開候補は通常 CI と別に `candidate-verify.yml` の `candidate-required`、9 個の必須検査、固定 inventory の全 realm receipt と 80% coverage を要求します。GitHub API の run/attempt/source/workflow/producer、artifact digest、署名済み report bytes を独立照合し、skip・missing・非成功を拒否します。
 
-検査成功後、`candidate.tgz` だけを標準の upload/download-artifact で同じ workflow run の後続 job へ渡します。各 writer は verify job の SHA256 出力とダウンロード後の bytes を照合します。生成 runner・bootstrap・独自の転送 manifest は使いません。npm 公開は YAML に記載した `bunx npm@latest publish`（OIDC・provenance・RC は next、stable は latest）、GitHub Release は `gh release create` で実行します。npm CLI の実行にだけ Node latest を用意します。publish job だけに id-token:write、release job だけに contents:write を与え、両方で environment `release` を使います。Release は独立した操作承認があるときだけ作ります。
+publish / release job は同じ tag SHA の checkout にある Node builtin bootstrap と trusted manifest で転送物を検証してから runner を起動します。writer では install / build を行いません。npm 11.19.0 は固定 URL と SHA512 を検証した archive から展開し、Node 24.21.0 で固定 CLI を実行します。npm の OIDC 権限は publish job、contents write は release job だけに与えます。Bun は開発用で、Node consumer と Worker の runtime は変えません。
 
-`scripts/release/publication-policy.json` の workflow / producer ID、許可した archive redirect host は独立確認後に設定する前提です。現状の null ID と `writerEnabled: false` は公開用 artifact の作成を拒否します。公開先の設定、tag / branch push、公開実行は別の承認が必要です。
+`.github/publication/trusted-policy.json` の workflow / producer ID、許可した archive redirect host は独立確認後に設定する前提です。現状の null ID と `writerEnabled: false` は安全側で拒否し、実 CI・公開の運用開始を示しません。公開先の設定、tag / branch push、公開実行は別の承認が必要です。
 
 外部 write の結果が不明な場合は自動再送しません。npm registry の同じ版・integrity・dist-tag、GitHub Release の tag / asset digest、run log を読み返し、人が状態を確定してから復旧を判断します。publish が失敗すれば release を起動せず、npm 成功後の Release 失敗も部分成功として扱います。共有 tag concurrency は実行中の処理を cancel しません。
 
-Dependabot は毎週月曜 05:00（Asia/Tokyo）に Bun の依存と Actions を更新します。
-自動統合の設定は terrarium / vivarium と同じ YAML にあり、main の品質 checks と branch protection が最終判断を行います。
-停止するときは GitHub Actions の対象 workflow を Disable workflow にします。
+Renovate は毎週月曜の早朝（Asia/Tokyo）に Bun の依存と Actions を更新する設定です。
+直接の許可済み devDependency 1 件の固定版 patch/minor だけが merge 判定の対象です。
+range・major・prerelease・複数依存・Actions 更新は手動確認へ残し、Renovate 自体の automerge は無効です。
+管理仕様は [Renovate の Bun manager](https://docs.renovatebot.com/modules/manager/bun/) を参照してください。
+`pr-labels.yml` は PR の path metadata からラベルだけを追加します。
+
+停止時は `MAINTENANCE_ENABLED` を無効にし、必要なら用途別 App の権限を取り消してください。
+不明な書込み結果は PR・commit・merge の実状態を照合してから手動復旧します。
+実 GitHub CI、App が起動する後続 CI、runtime の全 realm/80% coverage、実 API の atomic 操作は未検証です。
 
 ## 実行
 
@@ -218,14 +270,14 @@ node runtime/node/run.js --copy-in fixtures/aube-local-deps:/work --cwd /work/ap
   --env AUBE_NO_UPDATE_CHECK=1 dist/guests/aube list
 
 # ブラウザで実行する（COOP/COEP 付きの開発用サーバー）
-bun scripts/serve.js --port 8787
-#   http://127.0.0.1:8787/web/index.html?guest=probe
-#   http://127.0.0.1:8787/web/index.html?session=aube-1645
-#   http://127.0.0.1:8787/web/index.html?session=pitchfork-basic
+node scripts/serve.js --port 8787
+#   http://127.0.0.1:8787/runtime/web/index.html?guest=probe
+#   http://127.0.0.1:8787/runtime/web/index.html?session=aube-1645
+#   http://127.0.0.1:8787/runtime/web/index.html?session=pitchfork-basic
 ```
 
 ページは `crossOriginIsolated` を表示し、結果を `<pre id="output" data-testid="output">` と `data-exit-code` 属性に出す。
-ヘッダーを設定できない配信先（GitHub Pages など）では、`web/coi-sw.js`（service worker）が COOP/COEP を付ける。
+ヘッダーを設定できない配信先（GitHub Pages など）では、`runtime/web/coi-sw.js`（service worker）が COOP/COEP を付ける。
 
 診断用に `--core-flag -s`（blink のシステムコール記録）と `--core-flag -e`（ログを stderr に出す）を渡せる。
 ブラウザでは URL に `&core-flag=-s` を付ける（`-e` は自動で付く）。
@@ -233,7 +285,7 @@ bun scripts/serve.js --port 8787
 Git Bash では、`--copy-in fixtures/...:/work` の `/work` が Windows のパスに書き換えられてしまう。
 `MSYS_NO_PATHCONV=1 node runtime/node/run.js ...` のように、変換を止めて実行する。
 
-ブラウザの実行用 Worker（`web/worker.js`）は、コアを読み込む前に `Atomics.waitAsync` を無効にしている。
+ブラウザの実行用 Worker（`runtime/web/worker.js`）は、コアを読み込む前に `Atomics.waitAsync` を無効にしている。
 WebKit で Emscripten の代行依頼の通知が取りこぼされ、ゲスト全体が止まることがあったため（`docs/results/failures.md` の L-3）。
 
 aube は `--version` や `install` のたびに registry へ更新の確認をしに行く。ブラウザにはネットワークがなく、条件を
@@ -257,9 +309,9 @@ npx playwright test tests/browser/probe.spec.js tests/browser/aube-1645.spec.js 
 npx playwright test tests/browser/pitchfork-basic.spec.js   # pitchfork-basic（Chromium・Firefox・WebKit）
 ```
 
-pitchfork のテストの前提は `mise run build-guests pitchfork` と
-`mise run native-baseline pitchfork-basic --check-reproducible`。pitchfork が書き込む場所の調査
-（どのコマンドがどこに書くか、`status api` が何を返すか）は `mise run pitchfork-probe-paths` で native に確かめられる。
+pitchfork のテストの前提は `bash scripts/build-guests.sh pitchfork` と
+`bash scripts/native-baseline.sh pitchfork-basic --check-reproducible`。pitchfork が書き込む場所の調査
+（どのコマンドがどこに書くか、`status api` が何を返すか）は `bash scripts/pitchfork-probe-paths.sh` で native に確かめられる。
 
 Safari の代わりに Playwright の WebKit で確かめている。実機の Safari（macOS）での確認はまだしていない。
 
@@ -319,58 +371,3 @@ aidlc/                AI-DLC の作業記録（要件、計画、レビュー、
 ## License
 
 Apache License 2.0（blink の fork は ISC。[`docs/licenses.md`](docs/licenses.md) を参照）
-
-### PR product tests
-
-`ci.yml` runs on pull requests and pushes to `main`. In addition to lint,
-TypeScript checks and lightweight tests, `product-tests` builds the locked blink
-wasm core and probe/aube/pitchfork Linux guests from source, checks reproducible
-native transcripts against the committed baselines, then runs Node regressions
-and Chromium, Firefox and WebKit sequentially (one worker, no retries).
-`ci-required` requires the product job to succeed. Compiled products, build metadata and Playwright
-failure diagnostics are retained for seven days. Jobs use read-only permissions
-and do not receive repository secrets.
-
-The temporary digest-pinned input archive supplies only the unavailable locked
-core source bundle to PR tests; its prebuilt products are not reused. Extended
-cross-repository consumer and coverage checks remain in `candidate-verify.yml`.
-That workflow uses the current run’s latest Playwright in the disposable
-terrarium coverage workspace without changing the reviewed input snapshot.
-
-CI selects `ubuntu-latest`, Node `latest` and Bun `latest` on each run. Playwright, Biome and TypeScript
-are refreshed with `bun add --dev --no-save --ignore-scripts @playwright/test@latest @biomejs/biome@latest typescript@latest`,
-so tests use the latest release while preserving the committed dependency lock.
-Bun runs dependency installation, build, lint, type checks, the development server, general unit/tooling tests and browser tooling. Explicit
-Node tests retain Node to verify the published Node consumer and Worker behavior.
-The wasm compiler image is `emscripten/emsdk:latest` in PR product tests.
-
-Product builds use three parallel jobs: wasm, probe, and aube/pitchfork. Aube
-and pitchfork stay together because the pitchfork UI depends on aube and the
-builds share Cargo downloads. Each component is cached by resolved Docker image
-IDs and its build inputs; pitchfork also includes the actual aube bytes. CI
-pulls current compiler images before cache lookup. Native checks run before
-sharing artifacts, even on cache hits. Node, Chromium, Firefox and WebKit then
-run in four isolated matrix jobs, each with one worker and no retries. All
-matrix results must succeed for the existing product-tests/ci-required gates.
-Artifacts include source SHA, run ID and attempt to keep reruns isolated.
-
-## 開発タスクとスクリプトの配置
-
-実行用タスクは `mise-tasks/` に置く。miseが自動検出するため、`mise.toml`への個別登録は不要。
-`mise tasks ls`で一覧を確認し、`mise run build-guests probe`のように引数を渡せる。
-固定依存の導入は `mise run install-frozen`（キャッシュなしは `--cacheless`）。
-通常の確認は `mise run check`、`mise run typecheck`、`mise run build`、`mise run test-light`。
-
-- `mise-tasks/`: 開発タスク、wasm・ゲストのビルド、ソース取得、native基準値作成、書き込み先調査。
-- `scripts/lib/`と`scripts/emscripten-env.sh`: 複数タスクから読み込むコンテナ・環境設定。単独実行するタスクにはしない。
-- `scripts/ci/`: 候補入力の検証・証拠収集。`tasks.ts`はキャッシュなし導入の引数検証と既存CIの入口に限定し、通常のmiseタスクはBunへ直接渡す。
-- `scripts/package/`・`scripts/release/`・`scripts/terrarium/`・`scripts/guest-distribution/`: テストから使う検証・配布ロジック。YAMLへ複製せず、引き続き単体試験する。
-- `.github/workflows/`: PRイベント、matrix、キャッシュ、artifact、保守自動化の制御。製品ビルドはローカルと同じ `mise-tasks/` の実装を実行する。
-
-生成された `.js`・`.js.map`は `mise run build` の出力で、管理対象のスクリプトではない。
-製品ビルドをCI専用YAMLへ移すとローカル再現性を失うため、共有する実行ファイルを1つに保つ。
-候補検証のソース一覧には `mise-tasks/` も含め、タスク変更を検証対象から漏らさない。
-
-配置の共通方針はvivarium・terrariumに合わせる。実行用シェルはルートの `mise-tasks/` に用途別（`build/`、`test/`、`ci/`、`diagnostics/`、`install/`）の `.sh` ファイルとして置き、説明は `#MISE description` で記載する。
-共有・検証ロジックは `scripts/`、回帰試験は `tests/`、手順・判断は `docs/`、CI制御は `.github/workflows/` に置く。製品固有の `runtime/`・`guest/` は役割を保つ。
-既存の `mise run build-guests` などはaliasで維持し、`mise run build:guests` のような用途別タスク名も使える。

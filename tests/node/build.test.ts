@@ -1,7 +1,7 @@
 // FR1.1・FR1.2：blink の fork を固定したコミットで取得し、wasm にビルドできること。
 // pitchfork（intent 261005-pitchfork-on-blink の FR1.1・FR1.2）：dist/guests/pitchfork が
-// static な x86-64 の ELF で、取得したコミットと UI の node が記録され、ローカルパッチがないこと。
-// 前提：bash mise-tasks/build/blink-wasm.sh と bash mise-tasks/build/guests.sh pitchfork を実行済み
+// static な x86-64 の ELF で、取得したコミットと、当てたパッチ・UI の node が記録されていること。
+// 前提：bash scripts/build-blink-wasm.sh と bash scripts/build-guests.sh pitchfork を実行済み
 //       （README の「テスト」を参照）。
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
@@ -93,7 +93,7 @@ describe('fork の取得（FR1.1）', () => {
         'commit=main',
       ),
     );
-    const result = runScript('mise-tasks/build/fetch-blink.sh', {
+    const result = runScript('scripts/fetch-blink.sh', {
       env: {
         BLINK_LOCK: badLock,
         BLINK_DEST: path.join(scratch, 'blink-bad-format'),
@@ -113,7 +113,7 @@ describe('fork の取得（FR1.1）', () => {
       ),
     );
     const dest = path.join(scratch, 'blink-missing-commit');
-    const result = runScript('mise-tasks/build/fetch-blink.sh', {
+    const result = runScript('scripts/fetch-blink.sh', {
       env: { BLINK_LOCK: missingLock, BLINK_DEST: dest },
     });
     assert.notEqual(result.status, 0);
@@ -216,9 +216,15 @@ describe('pitchfork ゲストのビルド（FR1.1・FR1.2）', () => {
         'utf8',
       ).trim(),
     );
-    assert.equal(fields.patch, undefined);
-    assert.match(fields['ui-node'], /^v\d+\.\d+\.\d+$/);
-    assert.ok(Number(fields['ui-node'].slice(1).split('.')[0]) >= 26);
+    // 改行を LF にそろえてからハッシュを取る（コンテナに渡したパッチと同じバイト列にするため）
+    const patchPath = 'patches/pitchfork-2.29.0-musl-ioctl.patch';
+    const patchSha = createHash('sha256')
+      .update(
+        readFileSync(path.join(root, patchPath), 'utf8').replace(/\r\n/g, '\n'),
+      )
+      .digest('hex');
+    assert.equal(fields.patch, `${patchPath} sha256=${patchSha}`);
+    assert.match(fields['ui-node'], /^v24\.\d+\.\d+$/);
     assert.match(fields['ui-index-sha256'], /^[0-9a-f]{64}$/);
   });
 });

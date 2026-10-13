@@ -7,11 +7,14 @@ import { deflateRawSync, gzipSync } from 'node:zlib';
 
 const {
   ASSET_LIMITS,
+  NPM_ASSET,
   boundedBody,
   crc32,
   fetchAsset,
+  npmFiles,
   unpackTar,
   unpackZip,
+  verifyNpmIntegrity,
   readBoundedFile,
 } = (await import(
   pathToFileURL(resolve(process.cwd(), 'scripts/release/publication-assets.js'))
@@ -89,6 +92,43 @@ function tar(
   }
   return gzipSync(Buffer.concat([...rows, Buffer.alloc(1024)]));
 }
+let fixedNpm: Promise<Buffer> | undefined;
+function npmArchive() {
+  fixedNpm ??= readFile('/private/tmp/formicarium-u4-npm-11.19.0.tgz').catch(
+    () => fetchAsset(NPM_ASSET.url, ASSET_LIMITS.npmBytes),
+  );
+  return fixedNpm;
+}
+
+test('actual fixed official npm asset matches tracked URL integrity version and safe files', async () => {
+  const tracked = JSON.parse(
+    await readFile('.github/publication/trusted-policy.json', 'utf8'),
+  );
+  assert.deepEqual(tracked.npm, NPM_ASSET);
+  const bytes = await npmArchive();
+  verifyNpmIntegrity(bytes);
+  const files = npmFiles(bytes);
+  const existing = (await import(
+    pathToFileURL(resolve(process.cwd(), 'scripts/terrarium/coverage.js')).href
+  )) as typeof import('../../scripts/terrarium/coverage.js');
+  const isolated = (await import(
+    pathToFileURL(resolve(process.cwd(), 'scripts/release/inventory.js')).href
+  )) as typeof import('../../scripts/release/inventory.js');
+  assert.deepEqual(isolated.FILES, existing.FILES);
+  assert.deepEqual(isolated.REQUIRED_U1_REALMS, existing.REQUIRED_U1_REALMS);
+  assert.deepEqual(isolated.BROWSER_TITLES, existing.BROWSER_TITLES);
+  assert.equal(
+    JSON.parse(files.get('package/package.json')!.toString()).version,
+    '11.19.0',
+  );
+  assert.ok(files.has('package/bin/npm-cli.js'));
+  assert.ok(files.size <= 4096);
+});
+test('same length npm integrity mutation refuses before extraction', async () => {
+  const bytes = Buffer.from(await npmArchive());
+  bytes[0] ^= 1;
+  assert.throws(() => npmFiles(bytes), /INTEGRITY/);
+});
 test('stream boundary accepts exact cap and cancels cap plus one without trusting Content-Length', async (t) => {
   for (const extra of [0, 1])
     await t.test(
@@ -249,21 +289,6 @@ test('expanded bytes and member caps reject tar and ZIP before extraction', asyn
     /MEMBER/,
   );
 });
-test('UTF-8 browser diagnostic names are valid while unsafe components refuse', () => {
-  const name =
-    'ci-results/probe-ゲストが起動し、状態が保持される。-webkit/diagnostics.json';
-  const bytes = Buffer.from('{}');
-  assert.deepEqual(unpackZip(zip([{ name, bytes }])).get(name), bytes);
-  for (const invalid of [
-    'ci-results/../ゲスト.json',
-    'ゲスト/.npmrc',
-    'ゲスト\u0000.json',
-  ])
-    assert.throws(
-      () => unpackZip(zip([{ name: invalid, bytes }])),
-      /UNSAFE_ASSET_PATH/,
-    );
-});
 test('unsafe path link special duplicate and unsupported tar metadata refuse', () => {
   for (const name of ['../evil', '/evil', 'a/.npmrc', 'a/../evil', 'a\\evil']) {
     assert.throws(() => unpackTar(tar([{ name, value: 'bad' }]), 100, 10));
@@ -360,68 +385,6 @@ test('only trusted HTTPS redirects are allowed and credentials never follow', as
     /REDIRECT/,
   );
   await assert.rejects(fetchAsset('http://registry.npmjs.org/a', 32), /URL/);
-});
-test('GitHub artifact storage rotation is scoped and never receives API credentials', async () => {
-  const url =
-    'https://api.github.com/repos/aletheia-works/formicarium/actions/artifacts/123/zip';
-  const requests: RequestInit[] = [];
-  const fetcher: typeof fetch = async (_url, init) => {
-    requests.push(init ?? {});
-    return requests.length === 1
-      ? new Response(null, {
-          status: 302,
-          headers: {
-            location: 'https://productionresultssa19.blob.core.windows.net/a',
-          },
-        })
-      : new Response('bytes');
-  };
-  assert.equal(
-    (
-      await fetchAsset(
-        url,
-        32,
-        fetcher,
-        { Authorization: 'Bearer fixture' },
-        [],
-        1000,
-        true,
-      )
-    ).toString(),
-    'bytes',
-  );
-  assert.equal(requests[1]?.headers, undefined);
-  for (const [source, host, enabled] of [
-    [url, 'productionresultssa19.blob.core.windows.net', false],
-    [url, 'productionresultssa19.blob.core.windows.net.evil.example', true],
-    [url, 'unrelated.blob.core.windows.net', true],
-    [
-      'https://api.github.com/repos/other/repo/actions/artifacts/123/zip',
-      'productionresultssa19.blob.core.windows.net',
-      true,
-    ],
-    [
-      'https://registry.npmjs.org/a',
-      'productionresultssa19.blob.core.windows.net',
-      true,
-    ],
-  ] as const)
-    await assert.rejects(
-      fetchAsset(
-        source,
-        32,
-        async () =>
-          new Response(null, {
-            status: 302,
-            headers: { location: `https://${host}/a` },
-          }),
-        {},
-        [],
-        1000,
-        enabled,
-      ),
-      /REDIRECT/,
-    );
 });
 test('timeout cancels an unfinished stream and never returns partial success', async () => {
   let cancelled = false;

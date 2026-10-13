@@ -247,10 +247,12 @@ export async function reportCoverage({
   out,
   browserResults,
   candidatePath,
+  session,
 }: {
   out: string;
   browserResults: string;
   candidatePath: string;
+  session?: { nodeWorkers: number; browserCases: Record<string, number> };
 }) {
   const { metadata, layout, digests } = JSON.parse(
     await readFile(resolve(out, 'coverage-metadata.json'), 'utf8'),
@@ -304,6 +306,30 @@ export async function reportCoverage({
   ];
   if (nodeRows.length !== inventory.node.workers + inventory.node.host)
     throw new Error('Node planned Worker realms were not all retained');
+  if (session) {
+    const rows = JSON.parse(
+      await readFile(resolve(out, 'coverage-session-node.json'), 'utf8'),
+    ) as { name: string; counts: number[] }[];
+    if (rows.length !== session.nodeWorkers + 1)
+      throw Error('U2 planned Node Worker realms were not all retained');
+    for (const row of rows)
+      realms.push({
+        name: `session:${row.name}`,
+        buffer: Int32Array.from(row.counts).buffer,
+      });
+    expected.push(
+      'session:node-host',
+      ...Array.from(
+        { length: session.nodeWorkers },
+        (_, index) => `session:node-worker-${index + 1}`,
+      ),
+    );
+    for (const [title, workers] of Object.entries(session.browserCases)) {
+      if (Object.hasOwn(inventory.browserCases, title))
+        throw Error('U2 coverage case duplicates package case');
+      inventory.browserCases[title] = workers;
+    }
+  }
   const files: string[] = [];
   async function scan(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {

@@ -1,6 +1,6 @@
 // FR2.1・R-04：Node.js の Worker 上の blink でゲストを実行し、stdout・終了コードを受け取れること。
 // FR4.1・FR4.2・NFR3：ゲストと手順の表（runtime/registry.js）と、その入口の検証。
-// 前提：bash mise-tasks/build/blink-wasm.sh と bash mise-tasks/build/guests.sh probe を実行済み
+// 前提：bash scripts/build-blink-wasm.sh と bash scripts/build-guests.sh probe を実行済み
 //       （表と入口の検証のテストは、ビルド物なしで実行できる）。
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -12,7 +12,7 @@ import {
   GUESTS as GUEST_TABLE,
   SESSIONS as SESSION_TABLE,
 } from '../../runtime/registry.js';
-import { parseRunRequest, SESSIONS } from '../../web/sessions.js';
+import { parseRunRequest, SESSIONS } from '../../runtime/web/sessions.js';
 import { missingArtifacts, root } from './helpers.js';
 
 const TIMEOUT_MS = 5 * 60 * 1000;
@@ -75,7 +75,7 @@ describe('Node.js ランナー（runtime/node/run.js）', () => {
   });
 });
 
-describe('ブラウザ用の手順の定義（web/sessions.js）', () => {
+describe('ブラウザ用の手順の定義（runtime/web/sessions.js）', () => {
   it('診断フラグ -s をゲストと手順へ伝達する', () => {
     assert.deepEqual(
       parseRunRequest(new URLSearchParams('guest=probe&core-flag=-s')),
@@ -179,9 +179,9 @@ describe('ゲストと手順の表（runtime/registry.js、FR4.1）', () => {
     }
   });
 
-  it('表のゲストは、すべて mise-tasks/build/guests.sh のビルドの対象に含まれる', () => {
+  it('表のゲストは、すべて scripts/build-guests.sh のビルドの対象に含まれる', () => {
     const script = readFileSync(
-      path.join(root, 'mise-tasks/build/guests.sh'),
+      path.join(root, 'scripts/build-guests.sh'),
       'utf8',
     );
     const listed = /^guests="([a-z0-9 -]+)"$/m.exec(script);
@@ -199,7 +199,7 @@ describe('ゲストと手順の表（runtime/registry.js、FR4.1）', () => {
     );
     assert.equal(
       SESSIONS['pitchfork-basic'].script,
-      '../fixtures/sessions/pitchfork-basic.txt',
+      '../../fixtures/sessions/pitchfork-basic.txt',
     );
     assert.equal(SESSIONS['pitchfork-basic'].guest, 'pitchfork');
   });

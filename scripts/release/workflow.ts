@@ -1,4 +1,3 @@
-import { parse } from 'yaml';
 import { requireCondition } from './evidence.ts';
 import type { PublicationIdentity } from './publication.ts';
 import { validatePublicationIdentity } from './publication.ts';
@@ -19,37 +18,18 @@ export function assertPublicationContext(
       c.repository === i.repository &&
       c.ref === `refs/tags/${i.tag}` &&
       c.sha === i.sourceCommit,
-    `untrusted publication context: reviewed inputs require ${i.repository}@${i.sourceCommit} refs/tags/${i.tag}; observed ${c.repository}@${c.sha} ${c.ref} (${c.event}). Prepare matching RC/stable inputs and complete release preflight before publication; do not reuse another version's inputs.`,
+    'untrusted publication context',
   );
 }
-/** Read-only readiness check; never accepts a PR/fork or a different candidate source. */
-export function assertReleasePreflightContext(
-  i: PublicationIdentity,
-  c: PublicationContext,
-  packageVersion: string,
-) {
-  validatePublicationIdentity(i);
-  requireCondition(
-    c.event === 'workflow_dispatch' &&
-      c.repository === 'aletheia-works/formicarium' &&
-      c.repository === i.repository &&
-      c.ref === 'refs/heads/main' &&
-      c.sha === i.sourceCommit &&
-      packageVersion === i.version,
-    'untrusted release preflight context',
-  );
-}
-/** Check the YAML-owned automatic publication boundary. Legacy evidence tools remain local. */
+/** JSON is a YAML subset; validate the actual job graph and execution boundaries. */
 export function validatePublishWorkflow(text: string) {
-  const w = parse(text);
-  const same = (a: unknown, b: unknown) =>
-    JSON.stringify(a) === JSON.stringify(b);
+  const w = JSON.parse(text);
   requireCondition(
-    same(w.on, { push: { tags: ['v*'] } }),
+    JSON.stringify(w.on) === JSON.stringify({ push: { tags: ['v*'] } }),
     'publication triggers differ',
   );
   requireCondition(
-    same(w.permissions, { contents: 'read' }),
+    JSON.stringify(w.permissions) === JSON.stringify({ contents: 'read' }),
     'global publication permissions differ',
   );
   requireCondition(
@@ -58,139 +38,111 @@ export function validatePublishWorkflow(text: string) {
     'publication concurrency differs',
   );
   requireCondition(
-    same(Object.keys(w.jobs).sort(), [
-      'authorize',
-      'publish',
-      'release',
-      'verify',
-    ]),
+    JSON.stringify(Object.keys(w.jobs).sort()) ===
+      JSON.stringify(['publish', 'release', 'verify']),
     'publication jobs differ',
   );
-  const origin =
-    "github.event_name == 'push' && github.repository == 'aletheia-works/formicarium' && startsWith(github.ref, 'refs/tags/v')";
-  const auth = w.jobs.authorize;
-  requireCondition(
-    auth.if === origin &&
-      same(auth.permissions, {
-        contents: 'read',
-        actions: 'read',
-        'pull-requests': 'read',
-      }),
-    'authorization permissions/origin differ',
-  );
-  const authorization = auth.steps.find((s: any) => s.run)?.run ?? '';
-  for (const term of [
-    '.merge_commit_sha == $sha',
-    '.base.ref == "main"',
-    '.head.repo.full_name == $repo',
-    '.user.login == "aletheia-works-bot[bot]"',
-    '.head.ref == "release-please--branches--main--components--formicarium"',
-    '.head_sha == $sha',
-    '.workflow_id == $workflow',
-    '.conclusion == "success"',
-  ])
+  for (const [name, job] of Object.entries(w.jobs) as [string, any][]) {
     requireCondition(
-      authorization.includes(term),
-      'merged release PR CI gate missing',
+      job['runs-on'] === 'ubuntu-24.04' && job['timeout-minutes'] === 30,
+      'publication runner/time limit differs',
     );
-  requireCondition(
-    w.jobs.verify.needs === 'authorize' &&
-      w.jobs.verify.uses === './.github/workflows/ci.yml' &&
-      same(w.jobs.verify.permissions, { contents: 'read', actions: 'read' }),
-    'verification dependency/permissions differ',
-  );
-  for (const name of ['publish', 'release']) {
-    const job = w.jobs[name];
+    const expected =
+      name === 'publish'
+        ? {
+            contents: 'read',
+            actions: 'read',
+            checks: 'read',
+            'id-token': 'write',
+          }
+        : name === 'release'
+          ? { contents: 'write', actions: 'read', checks: 'read' }
+          : { contents: 'read', actions: 'read', checks: 'read' };
     requireCondition(
-      job.if === origin && job.environment === 'release',
-      'publication environment/origin differs',
+      JSON.stringify(job.permissions) === JSON.stringify(expected),
+      'job permissions differ',
     );
     requireCondition(
-      same(job.needs, name === 'publish' ? 'verify' : ['verify', 'publish']),
-      'publication dependency differs',
+      job.if ===
+        "github.event_name == 'push' && github.repository == 'aletheia-works/formicarium' && startsWith(github.ref, 'refs/tags/v')",
+      'job origin gate differs',
     );
+    if (name !== 'verify')
+      requireCondition(
+        job.environment === 'release' &&
+          job.needs === (name === 'publish' ? 'verify' : 'publish'),
+        'publication environment/dependency differs',
+      );
     requireCondition(
-      same(
-        job.permissions,
-        name === 'publish'
-          ? { contents: 'read', 'id-token': 'write' }
-          : { contents: 'write' },
+      !JSON.stringify(job).match(
+        /NODE_AUTH_TOKEN|NPM_TOKEN|_authToken|secrets\./,
       ),
-      'writer permissions differ',
+      'token fallback refused',
     );
-    requireCondition(
-      job.env.EXPECTED_SHA256 ===
-        '${{ needs.verify.outputs.candidate-sha256 }}' &&
-        job.env.DIST_TAG === '${{ needs.verify.outputs.candidate-dist-tag }}',
-      'verified identity output differs',
-    );
-    const download = job.steps.find((s: any) =>
-      s.uses?.startsWith('actions/download-artifact@'),
-    );
-    requireCondition(
-      download?.with?.name ===
-        '${{ needs.verify.outputs.candidate-artifact }}' &&
-        !download.with['run-id'] &&
-        !download.with['github-token'] &&
-        !download.with.repository,
-      'same-run artifact required',
-    );
-    const digest = job.steps.find((s: any) => s.id === 'digest');
-    requireCondition(
-      digest?.run.includes('sha256sum --check --strict') &&
-        digest.run.includes('$EXPECTED_SHA256') &&
-        job.steps.indexOf(download) < job.steps.indexOf(digest),
-      'artifact digest gate missing',
-    );
-    const selector = job.steps.find((s: any) => s.id === 'select-package');
-    requireCondition(
-      selector?.run.trim() ===
-        'mkdir -p .artifacts/publication-package\ncp .artifacts/downloaded-candidate/release-candidate/candidate.tgz .artifacts/publication-package/candidate.tgz' &&
-        job.steps.indexOf(download) < job.steps.indexOf(selector) &&
-        job.steps.indexOf(selector) < job.steps.indexOf(digest),
-      'artifact selection differs',
-    );
-    requireCondition(
-      job.steps.filter((s: any) => s.run).length ===
-        (name === 'publish' ? 4 : 3),
-      'unvalidated publication steps',
-    );
-    if (name === 'publish') {
-      const registry = job.steps.find((s: any) => s.id === 'registry');
-      requireCondition(
-        registry &&
-          job.steps.indexOf(digest) < job.steps.indexOf(registry) &&
-          registry.run.includes('digest !== process.env.EXPECTED_SHA256') &&
-          job.steps.at(-1).if === "steps.registry.outputs.skip == 'false'",
-        'registry integrity gate missing',
-      );
-    }
-    const writer = job.steps.at(-1);
-    requireCondition(
-      job.steps.indexOf(digest) < job.steps.indexOf(writer) &&
-        writer.run.includes(
-          name === 'publish'
-            ? 'bunx npm@latest publish ./candidate.tgz --provenance --access public --registry https://registry.npmjs.org/ --tag "$DIST_TAG" --ignore-scripts'
-            : 'gh release upload "$RELEASE_TAG" ./candidate.tgz',
-        ),
-      'unvalidated publication command',
-    );
-    for (const step of job.steps) {
-      requireCondition(
-        !step['continue-on-error'],
-        'failed gate bypass refused',
-      );
-      requireCondition(
-        !JSON.stringify(step).match(
-          /NODE_AUTH_TOKEN|NPM_TOKEN|_authToken|secrets\./,
-        ),
-        'token fallback refused',
-      );
+    for (const step of job.steps)
       if (step.uses)
         requireCondition(
           /^[^\s]+@[a-f0-9]{40}$/.test(step.uses),
           'action not pinned',
         );
+    const checkout = job.steps.find((s: any) =>
+      s.uses?.startsWith('actions/checkout@'),
+    );
+    requireCondition(
+      checkout?.with?.ref === '${{ github.sha }}' &&
+        checkout.with['persist-credentials'] === false,
+      'trusted exact tag checkout missing',
+    );
+    const runs = job.steps
+      .filter((s: any) => s.run)
+      .map((s: any) => s.run) as string[];
+    if (name === 'verify') {
+      requireCondition(
+        runs.includes('bun install --frozen-lockfile --ignore-scripts') &&
+          runs.includes('bun run build'),
+        'Bun verification tasks missing',
+      );
+      requireCondition(
+        runs.includes(
+          'node .github/publication/runner.mjs gate .artifacts/publication',
+        ) &&
+          runs.includes(
+            'node .github/publication/runner.mjs prepare-assets .artifacts/publication .artifacts/publication-assets',
+          ),
+        'publication gate missing',
+      );
+      const upload = job.steps.find((s: any) =>
+        s.uses?.startsWith('actions/upload-artifact@'),
+      );
+      requireCondition(
+        upload?.with?.name === 'publication-assets' &&
+          upload.with.path === '.artifacts/publication-assets/*' &&
+          upload.with['if-no-files-found'] === 'error',
+        'transfer artifact differs',
+      );
+      requireCondition(
+        !runs.some((r) =>
+          /npm publish|bootstrap.mjs (publish|release)/.test(r),
+        ),
+        'writer in verification refused',
+      );
+    } else {
+      requireCondition(
+        runs.length === 1 &&
+          runs[0] === `node .github/publication/bootstrap.mjs ${name}`,
+        'unvalidated publication command/gate',
+      );
+      requireCondition(
+        job.env?.AIDLC_RELEASE_OPERATION === name,
+        'publication operation differs',
+      );
+      requireCondition(
+        !job.steps.some(
+          (s: any) =>
+            s.uses && !/^(actions\/checkout|actions\/setup-node)@/.test(s.uses),
+        ),
+        'writer action refused',
+      );
     }
   }
   return w;

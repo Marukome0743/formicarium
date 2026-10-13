@@ -401,6 +401,32 @@ test('immutable U1 import preserves original realm names and rejects wrong pack/
     'original generation follows the bound report, not a collector constant',
   );
   assert.deepEqual(imported.originalRealmNames, report.realmNames);
+  const currentSixteen = structuredClone(report);
+  for (const path of [
+    'runtime/guest-validation.js',
+    'runtime/session-port.js',
+  ]) {
+    currentSixteen.files.push({ ...report.files[0], path });
+    currentSixteen.digests.push({ ...report.digests[0], path });
+  }
+  assert.throws(
+    () => componentImport(f.inventory, currentSixteen, 'e'.repeat(64)),
+    /denominator/,
+    'sixteen-file current distribution is not historical fourteen-file proof',
+  );
+  for (const path of [
+    'runtime/guest-validation.js',
+    'runtime/session-port.js',
+  ]) {
+    const newModule = structuredClone(report);
+    newModule.files[0].path = path;
+    newModule.digests[0].path = path;
+    assert.throws(
+      () => componentImport(f.inventory, newModule, 'e'.repeat(64)),
+      /denominator/,
+      'current U2 modules cannot inherit historical U1 component proof',
+    );
+  }
   assert.throws(
     () => componentImport(f.inventory, report, 'e'.repeat(64)),
     /original report path/,

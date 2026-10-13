@@ -1,6 +1,6 @@
 // FR7.1（ブラウザ）：aube #1645 の手順をブラウザ上の blink で実行し、書き起こしが
 // native（x86-64 Linux）の基準値 fixtures/baseline/aube-1645.native.txt と一致すること。
-// 前提：bash mise-tasks/build/guests.sh aube と bash mise-tasks/build/native-baseline.sh を実行済み。
+// 前提：bash scripts/build-guests.sh aube と bash scripts/native-baseline.sh を実行済み。
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,7 @@ const baseline = normalizeTranscript(
 );
 
 test('aube #1645 の書き起こしが native と一致する', async ({ page }) => {
-  await page.goto('/web/index.html?session=aube-1645');
+  await page.goto('/runtime/web/index.html?session=aube-1645');
   await page.waitForFunction(
     () => window.formicariumResult !== undefined,
     null,
@@ -43,7 +43,7 @@ test('aube #1645 の書き起こしが native と一致する', async ({ page })
 });
 
 test('一覧にない手順は実行しない', async ({ page }) => {
-  await page.goto('/web/index.html?session=no-such-session');
+  await page.goto('/runtime/web/index.html?session=no-such-session');
   await page.waitForFunction(() => window.formicariumResult !== undefined);
   const result = await page.evaluate(() => window.formicariumResult!);
   expect(result.error).toMatch(/unknown session/);

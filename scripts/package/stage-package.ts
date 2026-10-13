@@ -16,6 +16,8 @@ export const FIRST_PARTY_JS = Object.freeze([
   'runtime/public.js',
   'runtime/errors.js',
   'runtime/validation.js',
+  'runtime/guest-validation.js',
+  'runtime/session-port.js',
   'runtime/state.js',
   'runtime/lifecycle.js',
   'runtime/protocol.js',

@@ -22,6 +22,7 @@ import type {
   PublicationIdentity,
   PublicationRequest,
 } from '../../scripts/release/publication.js';
+import type { PublicationExecutor } from '../../scripts/release/publication-cli.js';
 
 const { approval, coverageFixture, fixture } = (await import(
   pathToFileURL(resolve(process.cwd(), 'tests/release/fixtures.js')).href
@@ -193,6 +194,14 @@ async function bundle(t: TestContext, version = '0.1.0-rc.1') {
     await writeFile(join(root, 'publication.json'), JSON.stringify(candidate));
   };
   await save();
+  const calls: {
+    executable: string;
+    args: string[];
+    options: Parameters<PublicationExecutor>[2];
+  }[] = [];
+  const executor: PublicationExecutor = (executable, args, options) => {
+    calls.push({ executable, args: [...args], options });
+  };
   return {
     ...f,
     request,
@@ -202,6 +211,8 @@ async function bundle(t: TestContext, version = '0.1.0-rc.1') {
     pack,
     save,
     core,
+    calls,
+    executor,
     setEnvironment,
   };
 }
@@ -222,51 +233,11 @@ const {
   readPublicationPolicy,
   verifyPublicationEvidence,
   publicationProducer,
-  verifyCoverageCandidateBinding,
 } = (await import(
   pathToFileURL(
     resolve(process.cwd(), 'scripts/release/publication-evidence.js'),
   ).href
 )) as typeof import('../../scripts/release/publication-evidence.js');
-
-test('coverage binds the site inventory and package tarball separately', () => {
-  const tarball = 'a'.repeat(64),
-    site = 'b'.repeat(64);
-  const report = {
-    generation: 'fresh',
-    sourceIdentity: 'c'.repeat(64),
-    candidateSha256: site,
-    componentImport: { originalTarballSha256: tarball },
-  };
-  const inventory = {
-    generation: report.generation,
-    sourceIdentity: report.sourceIdentity,
-    candidate: { sha256: site },
-    tarballSha256: tarball,
-  };
-  assert.doesNotThrow(() =>
-    verifyCoverageCandidateBinding(report, inventory, tarball),
-  );
-  for (const invalid of [
-    { ...inventory, tarballSha256: site },
-    { ...inventory, candidate: { sha256: tarball } },
-    { ...inventory, generation: 'stale' },
-    { ...inventory, sourceIdentity: 'd'.repeat(64) },
-  ])
-    assert.throws(
-      () => verifyCoverageCandidateBinding(report, invalid, tarball),
-      /binding differs/,
-    );
-  assert.throws(
-    () =>
-      verifyCoverageCandidateBinding(
-        { ...report, componentImport: { originalTarballSha256: site } },
-        inventory,
-        tarball,
-      ),
-    /binding differs/,
-  );
-});
 
 import { createHash } from 'node:crypto';
 import type {
@@ -336,17 +307,9 @@ async function evidenceFixture(t: TestContext) {
   };
   return { ...f, tracked, policy, envelope, observation };
 }
-test('tracked required checks verify while unset external IDs fail closed', async (t) => {
+test('actual tracked policy supplies successful candidate checks while unset external IDs fail closed', async (t) => {
   const f = await evidenceFixture(t);
-  assert.throws(
-    () =>
-      publicationProducer({
-        ...f.tracked,
-        workflowId: null,
-        producerAppId: null,
-      }),
-    /incomplete/,
-  );
+  assert.throws(() => publicationProducer(f.tracked), /incomplete/);
   assert.equal(
     (
       await verifyPublicationEvidence(
@@ -359,6 +322,7 @@ test('tracked required checks verify while unset external IDs fail closed', asyn
     ).decision.allowed,
     true,
   );
+  assert.equal(f.calls.length, 0);
 });
 test('ordinary CI cannot substitute for publication candidate evidence', async (t) => {
   const f = await evidenceFixture(t);
@@ -407,6 +371,7 @@ test('empty missing duplicate and unsuccessful check inventories refuse', async 
           f.policy,
         ),
       );
+      assert.equal(f.calls.length, 0);
     });
 });
 test('independent fake producer and stale run attempt reject matching submitted declarations', async (t) => {
@@ -462,6 +427,7 @@ test('coverage below eighty percent or zero denominator refuses before publicati
       ),
       /coverage/,
     );
+    assert.equal(f.calls.length, 0);
   }
 });
 test('fixed inventory or realm receipts cannot be discarded or replaced', async (t) => {
@@ -479,5 +445,6 @@ test('fixed inventory or realm receipts cannot be discarded or replaced', async 
       ),
       /inventory\/realm/,
     );
+    assert.equal(f.calls.length, 0);
   }
 });

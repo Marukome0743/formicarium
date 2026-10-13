@@ -1,15 +1,10 @@
+import type { ExecFileSyncOptions } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
-import {
-  appendFile,
-  copyFile,
-  mkdir,
-  readFile,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactBytes, hex, requireCondition } from './evidence.ts';
-import { sha256 } from './inventory.ts';
+import { HISTORICAL_PACKAGE_FILES, sha256 } from './inventory.ts';
 import type {
   PublicationCandidate,
   PublicationIdentity,
@@ -23,6 +18,8 @@ import {
 import {
   ASSET_LIMITS,
   fetchAsset,
+  NPM_ASSET,
+  npmFiles,
   readBoundedFile,
   safeAssetPath,
   unpackTar,
@@ -34,7 +31,6 @@ import {
 } from './publication-evidence.ts';
 import {
   assertPublicationContext,
-  assertReleasePreflightContext,
   validatePublishWorkflow,
 } from './workflow.ts';
 
@@ -49,7 +45,6 @@ export interface PublicationBoundary {
 export async function gatePublication(
   root: string,
   boundary: PublicationBoundary = { policyRoot: process.cwd(), fetcher: fetch },
-  mode: 'publication' | 'preflight' = 'publication',
 ) {
   const request = JSON.parse(
     (
@@ -69,6 +64,13 @@ export async function gatePublication(
     manifest,
     request.identity,
     join(root, 'candidate.tgz'),
+  );
+  // The existing independently checked publication protocol covers only the
+  // historical component set. New U2 modules need U4/B1 integration proof;
+  // arbitrary extra evidence fields cannot extend this gate's authority.
+  requireCondition(
+    archive.files.every((row) => HISTORICAL_PACKAGE_FILES.includes(row.path)),
+    'U2 publication missing module coverage; U4/B1 evidence required',
   );
   requireCondition(
     request.candidate.tarballSha256 === archive.tarball.sha256,
@@ -97,16 +99,12 @@ export async function gatePublication(
       buildInfo.blinkCommit === request.candidate.core.sourceCommit,
     'request core provenance differs',
   );
-  const context = {
+  assertPublicationContext(request.identity, {
     event: process.env.GITHUB_EVENT_NAME ?? '',
     repository: process.env.GITHUB_REPOSITORY ?? '',
     ref: process.env.GITHUB_REF ?? '',
     sha: process.env.GITHUB_SHA ?? '',
-  };
-  if (mode === 'preflight') {
-    const pkg = await json(resolve(boundary.policyRoot, 'package.json'));
-    assertReleasePreflightContext(request.identity, context, pkg.version);
-  } else assertPublicationContext(request.identity, context);
+  });
   requireCondition(
     request.identity.repository === 'aletheia-works/formicarium' &&
       request.identity.environment === 'release',
@@ -163,50 +161,17 @@ async function fetchBundle(out: string) {
     await writeFile(path, content, { flag: 'wx' });
   }
 }
-/** Only the YAML workflow performs external writes. This function exports a verified package. */
-export async function preparePublicationArtifact(
-  root: string,
-  out: string,
-  boundary?: PublicationBoundary,
-) {
-  const result = await gatePublication(root, boundary);
-  const policyRoot = boundary?.policyRoot ?? process.cwd();
-  const policy = await json(
-    resolve(policyRoot, 'scripts/release/publication-policy.json'),
-  );
-  requireCondition(
-    policy.schemaVersion === 1 && policy.writerEnabled === true,
-    'publication writer disabled',
-  );
-  const { identity, candidate, approvals } = result.request;
-  const releaseApproved = approvals.some(
-    (a) =>
-      a.operation === 'create-github-release' &&
-      a.target === identity.repository &&
-      a.candidateId === candidate.candidateId &&
-      a.version === identity.version &&
-      a.sourceCommit === identity.sourceCommit &&
-      a.humanInput.trim() &&
-      Number.isFinite(Date.parse(a.approvedAt)),
-  );
-  await mkdir(out, { recursive: false });
-  const tarball = join(out, 'candidate.tgz');
-  await copyFile(join(root, 'candidate.tgz'), tarball);
-  requireCondition(
-    sha256(await readBoundedFile(tarball, ASSET_LIMITS.inputBytes)) ===
-      result.archive.tarball.sha256,
-    'publication copy digest differs',
-  );
-  return {
-    version: identity.version,
-    tag: identity.tag,
-    'dist-tag': identity.distTag,
-    sha256: result.archive.tarball.sha256,
-    'release-approved': String(releaseApproved),
-  };
-}
+export type PublicationExecutor = (
+  executable: string,
+  args: readonly string[],
+  options: ExecFileSyncOptions,
+) => void;
+const executePublication: PublicationExecutor = (executable, args, options) => {
+  execFileSync(executable, [...args], options);
+};
 export async function publicationCli(
   args: string[],
+  executor: PublicationExecutor = executePublication,
   boundary?: PublicationBoundary,
 ) {
   const [command, ...paths] = args;
@@ -229,27 +194,132 @@ export async function publicationCli(
     await fetchBundle(paths[0]!);
     return { outcome: 'downloaded-not-published' };
   }
-  if (command === 'preflight' && paths.length === 1)
-    return (await gatePublication(paths[0]!, boundary, 'preflight')).decision;
-  if (command === 'gate' && paths.length === 1)
-    return (await gatePublication(paths[0]!, boundary)).decision;
-  if (command === 'prepare-artifact' && paths.length === 2) {
-    const output = await preparePublicationArtifact(
-      paths[0]!,
-      paths[1]!,
-      boundary,
-    );
-    if (process.env.GITHUB_OUTPUT)
-      await appendFile(
-        process.env.GITHUB_OUTPUT,
-        Object.entries(output)
-          .map(([key, value]) => `${key}=${value}\n`)
-          .join(''),
+  if (
+    ['gate', 'publish', 'release', 'prepare-assets'].includes(command ?? '') &&
+    paths.length === (command === 'prepare-assets' ? 2 : 1)
+  ) {
+    const result = await gatePublication(paths[0]!, boundary);
+    if (command === 'gate') return result.decision;
+    if (command === 'prepare-assets') {
+      const policyRoot = boundary?.policyRoot ?? process.cwd();
+      const npm = await fetchAsset(
+        NPM_ASSET.url,
+        ASSET_LIMITS.npmBytes,
+        boundary?.fetcher ?? fetch,
       );
-    return output;
+      npmFiles(npm);
+      const inputs = await readFile(`${resolve(paths[0]!)}.tgz`);
+      requireCondition(
+        sha256(inputs) === process.env.FORMICARIUM_RELEASE_INPUT_SHA256,
+        'transfer input digest differs',
+      );
+      unpackTar(inputs, ASSET_LIMITS.expandedBytes, ASSET_LIMITS.members);
+      const output = resolve(paths[1]!);
+      await mkdir(output);
+      for (const name of [
+        'runner.mjs',
+        'runner-manifest.json',
+        'trusted-policy.json',
+      ]) {
+        await writeFile(
+          join(output, name),
+          await readFile(join(policyRoot, '.github/publication', name)),
+          { flag: 'wx' },
+        );
+      }
+      await writeFile(join(output, 'npm.tgz'), npm, { flag: 'wx' });
+      await writeFile(join(output, 'inputs.tgz'), inputs, { flag: 'wx' });
+      return { outcome: 'verified-transfer-prepared-not-published' };
+    }
+    if (command === 'publish') {
+      requireCondition(
+        process.env.AIDLC_RELEASE_OPERATION === 'publish' &&
+          Boolean(process.env.ACTIONS_ID_TOKEN_REQUEST_URL) &&
+          !process.env.NODE_AUTH_TOKEN &&
+          !process.env.NPM_TOKEN,
+        'isolated OIDC publish job required',
+      );
+      const npmConfig = `${resolve(paths[0]!)}.empty-npmrc`;
+      const npmCli = process.env.FORMICARIUM_NPM_CLI ?? '';
+      requireCondition(
+        npmCli.startsWith('/') &&
+          npmCli.endsWith('/package/bin/npm-cli.js') &&
+          (await json(resolve(dirname(npmCli), '../package.json'))).version ===
+            '11.19.0',
+        'fixed verified npm CLI required',
+      );
+      await writeFile(npmConfig, '', { flag: 'wx' });
+      const cleanEnvironment = Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !/^(npm_config_|node_auth_token$|npm_token$)/i.test(key),
+        ),
+      );
+      executor(
+        process.execPath,
+        [
+          npmCli,
+          'publish',
+          join(resolve(paths[0]!), 'candidate.tgz'),
+          '--access',
+          'public',
+          '--registry',
+          'https://registry.npmjs.org/',
+          '--tag',
+          result.request.identity.distTag,
+          '--ignore-scripts',
+        ],
+        {
+          cwd: resolve(paths[0]!),
+          stdio: 'inherit',
+          env: {
+            ...cleanEnvironment,
+            NPM_CONFIG_USERCONFIG: npmConfig,
+            NPM_CONFIG_GLOBALCONFIG: '/dev/null',
+            NPM_CONFIG_PROVENANCE: 'true',
+          },
+        },
+      );
+      return { outcome: 'publish-command-completed-readback-required' };
+    }
+    requireCondition(
+      process.env.AIDLC_RELEASE_OPERATION === 'release',
+      'isolated release job required',
+    );
+    requireCondition(
+      result.request.approvals.some(
+        (a) =>
+          a.operation === 'create-github-release' &&
+          a.target === result.request.identity.repository &&
+          a.candidateId === result.request.candidate.candidateId &&
+          a.version === result.request.identity.version &&
+          a.sourceCommit === result.request.identity.sourceCommit &&
+          a.humanInput.trim() &&
+          Number.isFinite(Date.parse(a.approvedAt)),
+      ),
+      'GitHub Release approval missing',
+    );
+    executor(
+      'gh',
+      [
+        'release',
+        'create',
+        result.request.identity.tag,
+        join(resolve(paths[0]!), 'candidate.tgz'),
+        '--repo',
+        result.request.identity.repository,
+        '--verify-tag',
+        '--title',
+        `formicarium ${result.request.identity.version}`,
+        '--notes',
+        `Reviewed package SHA256: ${result.archive.tarball.sha256}`,
+        ...(result.request.identity.distTag === 'next' ? ['--prerelease'] : []),
+      ],
+      { stdio: 'inherit' },
+    );
+    return { outcome: 'release-command-completed-readback-required' };
   }
   throw new Error(
-    'usage: prepare <old-manifest> <old.tgz> <new-out> <identity>; validate <publication-manifest> <identity> <tgz>; plan <evidence-root> <request>; fetch|gate|preflight <bundle-root>; prepare-artifact <bundle-root> <output-directory>',
+    'usage: prepare <old-manifest> <old.tgz> <new-out> <identity>; validate <publication-manifest> <identity> <tgz>; plan <evidence-root> <request>; fetch|gate|publish|release <bundle-root>',
   );
 }
 if (

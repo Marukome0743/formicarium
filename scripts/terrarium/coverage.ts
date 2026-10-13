@@ -20,7 +20,6 @@ import type {
   CoverageInventory,
   Measurement,
 } from '../coverage-types.js';
-import { FIRST_PARTY_JS } from '../package/stage-package.js';
 import { directoryIdentity, sha256 } from './evidence.js';
 
 const { createCoverageMap } = coverageLibrary;
@@ -30,6 +29,24 @@ import instrumentLibrary from 'istanbul-lib-instrument';
 const { createInstrumenter } = instrumentLibrary;
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+// Historical Terrarium component: these fourteen files belong to the original
+// U1 proof, never to the current U2 sixteen-file distribution denominator.
+export const HISTORICAL_U1_JS = Object.freeze([
+  'runtime/contracts.js',
+  'runtime/public.js',
+  'runtime/errors.js',
+  'runtime/validation.js',
+  'runtime/state.js',
+  'runtime/lifecycle.js',
+  'runtime/protocol.js',
+  'runtime/worker-execution.js',
+  'runtime/core.js',
+  'runtime/guest-io.js',
+  'runtime/node/api.js',
+  'runtime/node/package-worker.js',
+  'runtime/web/api.js',
+  'runtime/web/package-worker.js',
+]);
 export const U2_FILES = ['manifest', 'fixtures', 'resolver'].map(
   (name) => `integration/terrarium/guest-distribution/${name}.js`,
 );
@@ -44,7 +61,7 @@ export const U3_FILES = [
   .map((name) => `terrarium/packages/terrarium/src/${name}.ts`)
   .concat('terrarium/web/terminal.mjs');
 export const FILES = Object.freeze([
-  ...FIRST_PARTY_JS,
+  ...HISTORICAL_U1_JS,
   ...U2_FILES,
   ...U3_FILES,
 ]);
@@ -242,13 +259,18 @@ export function componentImport(
   )
     throw new Error('U1 planned realm inventory differs');
   if (
-    report.files.length !== FIRST_PARTY_JS.length ||
+    report.files.length !== HISTORICAL_U1_JS.length ||
     new Set(report.files.map((file) => file.path)).size !==
-      FIRST_PARTY_JS.length
+      HISTORICAL_U1_JS.length ||
+    report.files.some((file) => !HISTORICAL_U1_JS.includes(file.path)) ||
+    report.digests.length !== HISTORICAL_U1_JS.length ||
+    new Set(report.digests.map((file) => file.path)).size !==
+      HISTORICAL_U1_JS.length ||
+    report.digests.some((file) => !HISTORICAL_U1_JS.includes(file.path))
   )
     throw new Error('U1 denominator differs');
   const coverage: Record<string, FileCoverageData> = {};
-  for (const path of FIRST_PARTY_JS) {
+  for (const path of HISTORICAL_U1_JS) {
     const file = structuredClone(
       inventory.metadata.find((row) => row.path === path)!,
     );
@@ -472,7 +494,7 @@ export async function prepareCoverage({
         : join(packageRoot, path);
     const bytes = await readFile(original);
     const compiled = path.endsWith('.ts')
-      ? stripTypeScriptTypes(bytes.toString(), { mode: 'strip' })
+      ? stripTypeScriptTypes(bytes.toString(), { mode: 'transform' })
       : bytes.toString();
     const instrumenter = createInstrumenter({
       esModules: true,

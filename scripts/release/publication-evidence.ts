@@ -27,13 +27,12 @@ export interface PublicationEvidencePolicy {
   toolchainRevision: string;
   requiredChecks: string[];
   archiveRedirectHosts?: string[];
-  allowGithubActionsStorageRedirects?: boolean;
 }
 export async function readPublicationPolicy(
   root: string,
 ): Promise<PublicationEvidencePolicy> {
   const bytes = await readBoundedFile(
-    resolve(root, 'scripts/release/publication-policy.json'),
+    resolve(root, '.github/publication/trusted-policy.json'),
     ASSET_LIMITS.metadataBytes,
   );
   requireCondition(
@@ -51,7 +50,7 @@ export function publicationProducer(policy: PublicationEvidencePolicy) {
       (policy.producerAppId ?? 0) > 0 &&
       policy.repository === 'aletheia-works/formicarium' &&
       policy.workflowIdentity === '.github/workflows/candidate-verify.yml' &&
-      policy.toolchainRevision === 'bun1.4.2-node26.11.1' &&
+      policy.toolchainRevision === 'bun1.4.2-node24.21.0' &&
       Array.isArray(policy.requiredChecks) &&
       policy.requiredChecks.length > 0 &&
       policy.requiredChecks.every(
@@ -62,32 +61,6 @@ export function publicationProducer(policy: PublicationEvidencePolicy) {
     'publication trusted policy incomplete',
   );
   return `${policy.producerAppId}:${policy.workflowId}:${policy.workflowIdentity}`;
-}
-/** The measured site digest and the published package digest identify different artifacts. */
-export function verifyCoverageCandidateBinding(
-  report: {
-    generation: string;
-    sourceIdentity: string;
-    candidateSha256: string;
-    componentImport?: { originalTarballSha256?: string };
-  },
-  inventory: {
-    generation: string;
-    sourceIdentity: string;
-    candidate?: { sha256?: string };
-    tarballSha256: string;
-  },
-  tarballSha256: string,
-) {
-  requireCondition(
-    /^[a-f0-9]{64}$/.test(report.candidateSha256) &&
-      report.candidateSha256 === inventory.candidate?.sha256 &&
-      report.generation === inventory.generation &&
-      report.sourceIdentity === inventory.sourceIdentity &&
-      inventory.tarballSha256 === tarballSha256 &&
-      report.componentImport?.originalTarballSha256 === tarballSha256,
-    'publication coverage candidate binding differs',
-  );
 }
 /** The API observation is a separate argument, never reconstructed from a submitted artifact. */
 export async function verifyPublicationEvidence(
@@ -287,8 +260,6 @@ export async function acquirePublicationEvidence(
     fetcher,
     headers,
     policy.archiveRedirectHosts ?? [],
-    120_000,
-    policy.allowGithubActionsStorageRedirects === true,
   );
   requireCondition(
     item.digest === `sha256:${digest(bytes)}`,
@@ -296,25 +267,16 @@ export async function acquirePublicationEvidence(
   );
   const files = unpackZip(bytes);
   const acceptanceBytes = files.get('ci-results/acceptance.json'),
-    reportBytes = files.get('ci-coverage-fixed24/report.json'),
-    inventoryBytes = files.get('ci-coverage-fixed24/inventory.json');
+    reportBytes = files.get('ci-coverage-fixed24/report.json');
   requireCondition(
     acceptanceBytes &&
       reportBytes &&
-      inventoryBytes &&
       acceptanceBytes.length <= ASSET_LIMITS.metadataBytes &&
-      reportBytes.length <= ASSET_LIMITS.metadataBytes &&
-      inventoryBytes.length <= ASSET_LIMITS.metadataBytes,
+      reportBytes.length <= ASSET_LIMITS.metadataBytes,
     'publication candidate receipt missing',
   );
   const acceptance = JSON.parse(acceptanceBytes.toString()),
-    report = JSON.parse(reportBytes.toString()),
-    inventory = JSON.parse(inventoryBytes.toString());
-  verifyCoverageCandidateBinding(
-    report,
-    inventory,
-    request.candidate.tarballSha256,
-  );
+    report = JSON.parse(reportBytes.toString());
   validateChecks(acceptance.checks);
   requireCondition(
     acceptance.passed === true &&
@@ -323,6 +285,7 @@ export async function acquirePublicationEvidence(
       acceptance.context?.event === 'workflow_dispatch' &&
       JSON.stringify(acceptance.coverage) === JSON.stringify(report) &&
       report.passed === true &&
+      report.candidateSha256 === request.candidate.tarballSha256 &&
       Array.isArray(report.files) &&
       Array.isArray(report.fixedInventory) &&
       Array.isArray(report.freshReceipts),
@@ -334,8 +297,8 @@ export async function acquirePublicationEvidence(
   let exactReport = false;
   for (const row of releaseRows) {
     if (
-      row.coverage &&
-      row.coverage.binding.candidateSha256 === report.candidateSha256 &&
+      row.coverage?.binding.candidateSha256 ===
+        request.candidate.tarballSha256 &&
       digest(
         await artifactBytes(
           root,

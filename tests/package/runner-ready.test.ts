@@ -11,11 +11,11 @@ test('U1 runner supports ESM, assertions and isolated cleanup on Node >=24', asy
   assert.deepEqual([...elfHeader().slice(0, 4)], [127, 69, 76, 70]);
 });
 
-test('U1 dependencies match the lockfile with an explicit latest CI tool overlay', async () => {
+test('U1 tool dependencies match the lockfile', async () => {
   const bun = process.env.FORMICARIUM_CI_BUN ?? 'bun';
-  assert.match(
+  assert.equal(
     execFileSync(bun, ['--version'], { encoding: 'utf8', shell: false }).trim(),
-    /^\d+\.\d+\.\d+$/,
+    '1.4.2',
   );
   // Bun's native JSONC parser handles its generated lock format. Feed bytes
   // through stdin, never interpolate lock contents into executable code.
@@ -65,14 +65,7 @@ test('U1 dependencies match the lockfile with an explicit latest CI tool overlay
     const pinned = lock.packages[name];
     assert.ok(pinned, `${name} must have a resolved lock entry`);
     assert.equal(metadata.name, name);
-    if (
-      ['@playwright/test', '@biomejs/biome', 'typescript'].includes(name) &&
-      process.env.FORMICARIUM_CI_LATEST_TOOLS === '1'
-    ) {
-      assert.match(metadata.version, /^\d+\.\d+\.\d+$/);
-    } else {
-      assert.equal(pinned[0], `${name}@${metadata.version}`, name);
-    }
+    assert.equal(pinned[0], `${name}@${metadata.version}`, name);
     assert.match(pinned[3], /^sha512-[A-Za-z0-9+/]+={0,2}$/, name);
   }
 });

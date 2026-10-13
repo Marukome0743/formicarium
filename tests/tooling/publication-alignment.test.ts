@@ -4,7 +4,14 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { parse, stringify } from 'yaml';
+import {
+  FIRST_PARTY_JS,
+  PACKAGE_FILES,
+} from '../../scripts/package/stage-package.js';
+import {
+  FIRST_PARTY_JS as PUBLICATION_JS,
+  PACKAGE_FILES as PUBLICATION_FILES,
+} from '../../scripts/release/inventory.js';
 
 const { bundle, stableBundle } = (await import(
   pathToFileURL(
@@ -21,42 +28,87 @@ const { validatePublishWorkflow } = (await import(
 const { artifactBytes } = (await import(
   pathToFileURL(resolve(process.cwd(), 'scripts/release/evidence.js')).href
 )) as typeof import('../../scripts/release/evidence.js');
+type WorkflowMutation = {
+  jobs: Record<string, { needs: string; permissions: { contents: string } }>;
+  concurrency: { 'cancel-in-progress': boolean };
+};
 const text = await readFile('.github/workflows/publish.yml', 'utf8');
-test('automatic workflow delegates full source-bound CI and exports only a verified package', () => {
+test('current publication preparation keeps exact sixteen JS and twenty-six pack file inventory', () => {
+  assert.equal(PUBLICATION_JS.length, 16);
+  assert.equal(PUBLICATION_FILES.length, 26);
+  assert.deepEqual(PUBLICATION_JS, FIRST_PARTY_JS);
+  assert.deepEqual(PUBLICATION_FILES, PACKAGE_FILES);
+});
+test('current U2 pack with historical coverage invokes zero publication executors', async (t) => {
+  const f = await bundle(t, PACKAGE_FILES);
+  await assert.rejects(
+    publicationCli(['publish', f.root], f.executor, f.boundary),
+    /U2 publication missing module coverage/,
+  );
+  assert.equal(f.calls.length, 0);
+});
+test('actual workflow uses Bun development and trusted tag bootstrap writers', () => {
   const workflow = validatePublishWorkflow(text);
-  assert.equal(workflow.jobs.verify.uses, './.github/workflows/ci.yml');
-  assert.match(
-    workflow.jobs.publish.steps.at(-1).run,
-    /bunx npm@latest publish/,
+  assert.ok(
+    workflow.jobs.verify.steps.some(
+      (s: { run?: string }) =>
+        s.run === 'bun install --frozen-lockfile --ignore-scripts',
+    ),
   );
-  assert.doesNotMatch(
-    text,
-    /FORMICARIUM_RELEASE_INPUT|publication-cli|rcAdoption/,
-  );
+  for (const name of ['publish', 'release'])
+    assert.equal(
+      workflow.jobs[name].steps.at(-1).run,
+      `node .github/publication/bootstrap.mjs ${name}`,
+    );
+});
+test('writer install build token fallback and alternate payload refuse', () => {
+  for (const step of [
+    { run: 'bun install' },
+    { run: 'bun run build' },
+    { run: 'npm publish other.tgz' },
+    { env: { NPM_TOKEN: 'fake' } },
+  ]) {
+    const workflow = JSON.parse(text);
+    workflow.jobs.publish.steps.push(step);
+    assert.throws(
+      () => validatePublishWorkflow(JSON.stringify(workflow)),
+      /unvalidated|token/,
+    );
+  }
 });
 test('failed prerequisite cannot bypass dependencies permissions or tag serialization', () => {
   for (const mutate of [
-    (w: any) => (w.jobs.publish.needs = 'authorize'),
-    (w: any) => (w.jobs.release.needs = 'verify'),
-    (w: any) => (w.jobs.verify.permissions.contents = 'write'),
-    (w: any) => (w.concurrency['cancel-in-progress'] = true),
+    (w: WorkflowMutation) => (w.jobs.publish.needs = 'release'),
+    (w: WorkflowMutation) => (w.jobs.release.needs = 'verify'),
+    (w: WorkflowMutation) => (w.jobs.verify.permissions.contents = 'write'),
+    (w: WorkflowMutation) => (w.concurrency['cancel-in-progress'] = true),
   ]) {
-    const workflow = parse(text);
+    const workflow = JSON.parse(text);
     mutate(workflow);
     assert.throws(
-      () => validatePublishWorkflow(stringify(workflow)),
+      () => validatePublishWorkflow(JSON.stringify(workflow)),
       /dependency|permissions|concurrency/,
     );
   }
 });
-test('normal RC and stable independently observed candidate export the correct dist tag', async (t) => {
+test('normal RC and stable independently observed full candidate invoke Node fixed npm exactly once', async (t) => {
   for (const channel of ['rc', 'stable']) {
     const f = channel === 'rc' ? await bundle(t) : await stableBundle(t);
-    const output = (await publicationCli(
-      ['prepare-artifact', f.root, join(f.root, 'out')],
-      f.boundary,
-    )) as { 'dist-tag': string };
-    assert.equal(output['dist-tag'], channel === 'rc' ? 'next' : 'latest');
+    await publicationCli(['publish', f.root], f.executor, f.boundary);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.calls[0].executable, process.execPath);
+    assert.deepEqual(f.calls[0].args, [
+      f.npmCli,
+      'publish',
+      f.tarball,
+      '--access',
+      'public',
+      '--registry',
+      'https://registry.npmjs.org/',
+      '--tag',
+      channel === 'rc' ? 'next' : 'latest',
+      '--ignore-scripts',
+    ]);
   }
 });
 test('missing candidate API ref forged producer and mutated report start zero executors', async (t) => {
@@ -106,28 +158,16 @@ test('missing candidate API ref forged producer and mutated report start zero ex
                 (await artifactBytes(f.root, name)).length,
                 8 * 1024 * 1024,
               );
-            await assert.rejects(
-              readFile(join(f.root, 'out/candidate.tgz')),
-              /ENOENT/,
-            );
+            assert.equal(f.calls.length, 0);
           } else if (extra) {
             await assert.rejects(
-              publicationCli(
-                ['prepare-artifact', f.root, join(f.root, 'out')],
-                f.boundary,
-              ),
+              publicationCli(['publish', f.root], f.executor, f.boundary),
               /JSON_METADATA_LIMIT/,
             );
-            await assert.rejects(
-              readFile(join(f.root, 'out/candidate.tgz')),
-              /ENOENT/,
-            );
+            assert.equal(f.calls.length, 0);
           } else {
-            await publicationCli(
-              ['prepare-artifact', f.root, join(f.root, 'out')],
-              f.boundary,
-            );
-            assert.ok(await readFile(join(f.root, 'out/candidate.tgz')));
+            await publicationCli(['publish', f.root], f.executor, f.boundary);
+            assert.equal(f.calls.length, 1);
           }
         },
       );
@@ -152,22 +192,13 @@ test('missing candidate API ref forged producer and mutated report start zero ex
           await writeFile(join(f.root, path), bytes);
           if (extra) {
             await assert.rejects(
-              publicationCli(
-                ['prepare-artifact', f.root, join(f.root, 'out')],
-                f.boundary,
-              ),
+              publicationCli(['publish', f.root], f.executor, f.boundary),
               /JSON|METADATA|metadata|limit/i,
             );
-            await assert.rejects(
-              readFile(join(f.root, 'out/candidate.tgz')),
-              /ENOENT/,
-            );
+            assert.equal(f.calls.length, 0);
           } else {
-            await publicationCli(
-              ['prepare-artifact', f.root, join(f.root, 'out')],
-              f.boundary,
-            );
-            assert.ok(await readFile(join(f.root, 'out/candidate.tgz')));
+            await publicationCli(['publish', f.root], f.executor, f.boundary);
+            assert.equal(f.calls.length, 1);
           }
         },
       );
@@ -191,12 +222,25 @@ test('missing candidate API ref forged producer and mutated report start zero ex
       return response;
     };
     await assert.rejects(
-      publicationCli(
-        ['prepare-artifact', f.root, join(f.root, 'out')],
-        f.boundary,
-      ),
+      publicationCli(['publish', f.root], f.executor, f.boundary),
       /API reference|producer|digest/,
     );
-    await assert.rejects(readFile(join(f.root, 'out/candidate.tgz')), /ENOENT/);
+    assert.equal(f.calls.length, 0);
   }
+});
+test('unknown writer result propagates once without automatic resend', async (t) => {
+  const f = await bundle(t);
+  let writes = 0;
+  await assert.rejects(
+    publicationCli(
+      ['publish', f.root],
+      () => {
+        writes++;
+        throw Error('unknown external result');
+      },
+      f.boundary,
+    ),
+    /unknown external result/,
+  );
+  assert.equal(writes, 1);
 });

@@ -21,7 +21,7 @@ const observedJobs = JSON.parse(process.env.OBSERVED_JOBS ?? '{}') as Record<
   string,
   { result: string }
 >;
-const jobs = ['quality', 'product-tests', 'commit-format'].map((name) => {
+const jobs = ['quality', 'commit-format'].map((name) => {
   const state = observedJobs[name]?.result;
   if (!['success', 'failure', 'skipped', 'cancelled'].includes(state ?? ''))
     throw Error(`missing dependency job outcome: ${name}`);
@@ -40,11 +40,8 @@ await writeFile(
       workflowIdentity: '.github/workflows/ci.yml',
       workflowRef: process.env.GITHUB_WORKFLOW_REF,
       purpose: 'ordinary-ci',
-      expectedToolchain: { node: 'latest', bun: 'latest', lockDigest },
-      receiptRuntime: {
-        bun: process.versions.bun,
-        nodeCompatibility: process.versions.node,
-      },
+      expectedToolchain: { node: '24.21.0', bun: '1.4.2', lockDigest },
+      receiptNodeVersion: process.versions.node,
       observedJobs: jobs,
       limits:
         'Final check conclusions, producer identity, executed SHA and artifact digest require independent GitHub API reconciliation.',

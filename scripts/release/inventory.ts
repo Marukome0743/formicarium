@@ -6,6 +6,8 @@ export const FIRST_PARTY_JS = Object.freeze([
   'runtime/public.js',
   'runtime/errors.js',
   'runtime/validation.js',
+  'runtime/guest-validation.js',
+  'runtime/session-port.js',
   'runtime/state.js',
   'runtime/lifecycle.js',
   'runtime/protocol.js',
@@ -33,6 +35,38 @@ export const PACKAGE_FILES = Object.freeze([
 export const sha256 = (bytes: string | Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex');
 
+// Immutable historical publication/coverage boundary. New sixteen-file packs
+// are prepared separately and cannot inherit these fourteen-file proofs.
+export const HISTORICAL_U1_JS = Object.freeze([
+  'runtime/contracts.js',
+  'runtime/public.js',
+  'runtime/errors.js',
+  'runtime/validation.js',
+  'runtime/state.js',
+  'runtime/lifecycle.js',
+  'runtime/protocol.js',
+  'runtime/worker-execution.js',
+  'runtime/core.js',
+  'runtime/guest-io.js',
+  'runtime/node/api.js',
+  'runtime/node/package-worker.js',
+  'runtime/web/api.js',
+  'runtime/web/package-worker.js',
+]);
+export const HISTORICAL_PACKAGE_FILES = Object.freeze([
+  ...HISTORICAL_U1_JS,
+  'types/index.d.ts',
+  'types/node.d.ts',
+  'types/browser.d.ts',
+  'assets/blink.mjs',
+  'assets/blink.wasm',
+  'assets/build-info.json',
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
+  'README.md',
+  'package.json',
+]);
+
 export const U2_FILES = ['manifest', 'fixtures', 'resolver'].map(
   (name) => `integration/terrarium/guest-distribution/${name}.js`,
 );
@@ -47,7 +81,7 @@ export const U3_FILES = [
   .map((name) => `terrarium/packages/terrarium/src/${name}.ts`)
   .concat('terrarium/web/terminal.mjs');
 export const FILES = Object.freeze([
-  ...FIRST_PARTY_JS,
+  ...HISTORICAL_U1_JS,
   ...U2_FILES,
   ...U3_FILES,
 ]);

@@ -27,14 +27,16 @@ const register = (realm: Realm) => {
   return realm;
 };
 
-test('coverage fixed14 inventory includes all unimported files at zero', () => {
+test('coverage fixed16 inventory includes all unimported files at zero', () => {
   const result = mergeRealms(
     metadata,
     layout,
     [register(createRealm(layout, 'host'))],
     ['host'],
   );
-  assert.equal(result.map.files().length, 14);
+  assert.equal(result.map.files().length, 16);
+  assert.ok(result.map.files().includes('runtime/guest-validation.js'));
+  assert.ok(result.map.files().includes('runtime/session-port.js'));
   assert.equal(result.lines.pct, 0);
   assert.equal(result.passed, false);
 });
