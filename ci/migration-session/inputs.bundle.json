@@ -134,7 +134,7 @@
     },
     {
       "path": "mise.toml",
-      "sha256": "3fc10acbbcdb57e12444253f6bf7aa73bd54a8e85e04be6c63efd8559e9486de"
+      "sha256": "e58e37a8ad8e6c5e1489041f691912a09b1a26160b0bb4e605bc8f55565cace3"
     },
     {
       "path": "package.json",
@@ -174,11 +174,11 @@
     },
     {
       "path": "runtime/guest-validation.js",
-      "sha256": "e56709828fbb09d0ed5059564702022facc5bca3f6c7bf96682e56d710942927"
+      "sha256": "faeb15c16773c7c98f241529c19d9c40722e2dafb1f7a55e21becbaab95f1d58"
     },
     {
       "path": "runtime/guest-validation.ts",
-      "sha256": "2ba3cfc7bac74372fef0071b369108deed63a0e295507632edbc15d6e31cb3c6"
+      "sha256": "55540f60647ca2308e790fb88c3cc75c7bd84922fb7621205e5719faf993c1e0"
     },
     {
       "path": "runtime/lifecycle.js",
@@ -714,11 +714,11 @@
     },
     {
       "path": "tests/migration-session/fixture.test.js",
-      "sha256": "b8147086c49c5f49f51e63455fb93088cb436d89f0be87b8f6ca7ea216f82c0c"
+      "sha256": "b5af54cc4ce566f8ff6614d46f4da58ab25cd94565543b08690b332f4ebb0ef5"
     },
     {
       "path": "tests/migration-session/fixture.test.ts",
-      "sha256": "86a45ae86bbd3eee9582db3fdfc8cf7ebe19a631a1a5f29fa5da940fda10df31"
+      "sha256": "6724b9934c3f1525155fb2ec5556be199010e6d2e0ecbe2f675b571e440a5dab"
     },
     {
       "path": "tests/migration-session/fixtures.js",

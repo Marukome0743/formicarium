@@ -88,6 +88,24 @@ test('symlink prefix chain and non-directory parent are checked throughout paths
   );
   assert.throws(() => fixtureToFsEntries([file('/a'), file('/a/b')]), invalid);
 });
+test('finite symlink reuse resolves targets before the remaining path suffix', () => {
+  for (const target of ['/link/../link/file', '/link/../link/../link/file']) {
+    const entries: FsEntry[] = [
+      { path: '/real', type: 'dir', mode: 0o755 },
+      file('/real/file'),
+      { path: '/link', type: 'symlink', target: '/real' },
+      { path: '/x', type: 'symlink', target },
+    ];
+    assert.deepEqual(fixtureToFsEntries(entries), [...entries].sort((a, b) =>
+      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+    ));
+  }
+  assert.throws(() => fixtureToFsEntries([
+    file('/real/file'),
+    { path: '/link', type: 'symlink', target: '/real/file' },
+    { path: '/x', type: 'symlink', target: '/link/child' },
+  ]), invalid);
+});
 test('hardlinks preserve inode identity but differ in mode or content reject', () => {
   const entries = [file('/a'), file('/b')];
   const output = fixtureToFsEntries(entries);

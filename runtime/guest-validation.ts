@@ -477,7 +477,14 @@ export function fixtureToFsEntries(
       const target = link.target.startsWith('/')
         ? link.target
         : `/${resolved.slice(0, -1).join('/')}/${link.target}`;
-      return resolveLinks(`${target}/${parts.slice(i + 1).join('/')}`, visited);
+      // A link remains active only while its own target is being resolved.
+      // The finite caller suffix may legally traverse the same link again.
+      const resolvedTarget = resolveLinks(target, visited);
+      visited.delete(prefix);
+      return resolveLinks(
+        `${resolvedTarget}/${parts.slice(i + 1).join('/')}`,
+        visited,
+      );
     }
     return `/${resolved.join('/')}`;
   };
