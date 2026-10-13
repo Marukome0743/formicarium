@@ -23,6 +23,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
+      - name: Bind verified Bun executable
+        shell: bash
+        run: |
+          bun_executable="$(command -v bun)"
+          [[ "$bun_executable" = /* && -x "$bun_executable" && "$bun_executable" != *$'\n'* && "$bun_executable" != *$'\r'* ]]
+          bun_version="$("$bun_executable" --version)"
+          [[ "$bun_version" = '1.4.2' ]]
+          printf 'BUN_EXECUTABLE=%s\n' "$bun_executable" >> "$GITHUB_ENV"
+          printf 'Verified Bun executable: %s\nVersion: %s\n' "$bun_executable" "$bun_version"
       - run: node scripts/ci/tasks.ts install-frozen --cacheless
       - run: node scripts/ci/tasks.ts build
       - run: node scripts/ci/tasks.ts typecheck
