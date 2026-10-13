@@ -14,6 +14,56 @@ import {
   validateCIContext,
 } from '../../scripts/migration-session/ci.js';
 import { sha256 } from '../../scripts/package/stage-package.js';
+import {
+  BLINK_IDENTITY,
+  validateBlinkLock,
+  inspectRestoredCore,
+} from '../../scripts/migration-session/ci-core.js';
+
+test('fixed local core lock refuses short, swapped and duplicate identities', () => {
+  const valid = `commit=${BLINK_IDENTITY.head}\nupstream_commit=${BLINK_IDENTITY.upstream}\n`;
+  assert.deepEqual(validateBlinkLock(valid), BLINK_IDENTITY);
+  for (const invalid of [
+    valid.replace(BLINK_IDENTITY.head, 'short'),
+    valid.replace(BLINK_IDENTITY.head, BLINK_IDENTITY.upstream),
+    valid + `commit=${BLINK_IDENTITY.head}\n`,
+  ])
+    assert.throws(() => validateBlinkLock(invalid), /lock/);
+});
+test('mock Git object observations require exact HEAD/upstream, emufd diff and clean tree', () => {
+  const outputs = new Map([
+    ['rev-parse HEAD', BLINK_IDENTITY.head],
+    [`rev-parse ${BLINK_IDENTITY.upstream}^{commit}`, BLINK_IDENTITY.upstream],
+    [
+      `diff --name-only ${BLINK_IDENTITY.upstream} ${BLINK_IDENTITY.head}`,
+      'blink/emufd.c',
+    ],
+    ['status --porcelain --untracked-files=all', ''],
+  ]);
+  const execute = (_directory: string, args: string[]) => {
+    const result = outputs.get(args.join(' '));
+    assert.notEqual(result, undefined);
+    return result!;
+  };
+  inspectRestoredCore('synthetic-git-observations', execute);
+  for (const [key, wrong] of [
+    ['rev-parse HEAD', 'b'.repeat(40)],
+    [`rev-parse ${BLINK_IDENTITY.upstream}^{commit}`, 'c'.repeat(40)],
+    [
+      `diff --name-only ${BLINK_IDENTITY.upstream} ${BLINK_IDENTITY.head}`,
+      'other.c',
+    ],
+    ['status --porcelain --untracked-files=all', '?? injected-hook'],
+  ]) {
+    const previous = outputs.get(key!)!;
+    outputs.set(key!, wrong!);
+    assert.throws(
+      () => inspectRestoredCore('synthetic-git-observations', execute),
+      /HEAD|upstream|dirty/,
+    );
+    outputs.set(key!, previous);
+  }
+});
 
 const digest = sha256('synthetic-input-not-real-guest');
 function fixture() {
@@ -26,7 +76,7 @@ function fixture() {
   };
 }
 test('synthetic manifest requires complete exact destinations and permits shared blob SHA', () => {
-  assert.equal(validateCIInputManifest(fixture()).files.length, 18);
+  assert.equal(validateCIInputManifest(fixture()).files.length, 19);
   for (const mutate of [
     (row: ReturnType<typeof fixture>) => row.files.pop(),
     (row: ReturnType<typeof fixture>) => {
@@ -154,7 +204,7 @@ async function withBundle(
 test('synthetic regular blob is deduplicated, copied and checked without overwriting', async () => {
   await withBundle(async (root, manifestPath) => {
     const installed = await installCIInputs(root, manifestPath);
-    assert.equal(installed.created.length, 18);
+    assert.equal(installed.created.length, 19);
     assert.equal((await installCIInputs(root, manifestPath)).created.length, 0);
     await writeFile(resolve(root, CI_INPUT_PATHS[0]!), 'tamper');
     await assert.rejects(

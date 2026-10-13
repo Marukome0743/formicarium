@@ -92,6 +92,11 @@
       "path": "docs/results/terrarium-migration-preflight-evidence/mirror-input.json",
       "bytes": 7156,
       "sha256": "84fe5864c87b7bd54c79bcf8f71105f1ad6584d7fe7c9f9146ddbcf5ce099c8e"
+    },
+    {
+      "path": ".artifacts/migration-session/blink-source.bundle",
+      "bytes": 8776305,
+      "sha256": "939466d397658897730cf84d64581605b3aa27671da577626a72f50a71e5be04"
     }
   ],
   "sourceFiles": [
@@ -113,7 +118,7 @@
     },
     {
       "path": ".github/workflows/migration-session-u2.yml",
-      "sha256": "137b3fa85548d355d58b1402273b4954455c011e4edd896f801a152bce0a7c96"
+      "sha256": "9d1b0d573473747c5d69ae1b1d8118a9a1258a0d1137c9e4689f918c5c1eea51"
     },
     {
       "path": "README.md",
@@ -412,20 +417,28 @@
       "sha256": "f84abf1f66182bffdad14e585cf217e6ebb782f81744a29c39b259d01f65ed13"
     },
     {
+      "path": "scripts/migration-session/ci-core.js",
+      "sha256": "6c46fe7cd8beac506b5d3014fbf3be0c4352a5344e78821ccf6c2597d7144ee7"
+    },
+    {
+      "path": "scripts/migration-session/ci-core.ts",
+      "sha256": "59f1cbdbcd9946e67e95c3f97f52f73615a5b1056ca7c582d4e48aa5de811829"
+    },
+    {
       "path": "scripts/migration-session/ci-inputs.js",
-      "sha256": "bc406edc37b1dd6329e422f87658a12e13422f6fa77b4819c47a5b4e75c00a83"
+      "sha256": "13f3e95f466da4cecf48f9cb944ce4abe3bb2c7374f9f1f3afd9a445ba792bd1"
     },
     {
       "path": "scripts/migration-session/ci-inputs.ts",
-      "sha256": "0f7ecccc078a6dc860bea5558712890e5aeeaea79d4c1048398c8bcc4f9a8ad6"
+      "sha256": "fd625fcbe59f59076b4deb3a89e520c242258a1fc66b47564759a6c1d0fd2aa9"
     },
     {
       "path": "scripts/migration-session/ci.js",
-      "sha256": "e339f9b1098cb6bc8508c41d0df04b6f84918c7118402c96d6d66bfe0f05db6c"
+      "sha256": "601bc5b0fc3324f1096f5a57556b0c52a49f75abf9a4645a7b2949d023eb40bc"
     },
     {
       "path": "scripts/migration-session/ci.ts",
-      "sha256": "a86cf352eac4009cf815a7de36d07a7621782d8647e9728b00be98f17a02304e"
+      "sha256": "589d644db40a6b19ec9ed638ae6bc6d58f3742aebdfd8946020e7b359b74228d"
     },
     {
       "path": "scripts/migration-session/completion.js",
@@ -661,11 +674,11 @@
     },
     {
       "path": "tests/migration-session/ci.test.js",
-      "sha256": "0d486c2d0633cfd847bec4e3315f0269bf5a8238d24cc7b854ce0c6bfbf7ee60"
+      "sha256": "f85f73b9041660c40607f93ccb5bf90de758e0496e960cd102fa1a427359441b"
     },
     {
       "path": "tests/migration-session/ci.test.ts",
-      "sha256": "a559363936f95d866a77f1e9b10aef3a3fd00caf27761095838374bacfedec8b"
+      "sha256": "93bd92b9131d6aef8e39104e8c424b62130da7bbb8f38bb5bfeabc1167eb30cf"
     },
     {
       "path": "tests/migration-session/completion.test.js",

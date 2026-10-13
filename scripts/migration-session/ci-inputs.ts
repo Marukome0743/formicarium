@@ -8,6 +8,7 @@ import {
 import { sha256 } from '../package/stage-package.js';
 
 export const CI_INPUT_PATHS = Object.freeze([
+  '.artifacts/migration-session/blink-source.bundle',
   'dist/blink/blink.mjs',
   'dist/blink/blink.wasm',
   'dist/blink/build-info.json',

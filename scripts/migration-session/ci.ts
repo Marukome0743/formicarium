@@ -7,6 +7,7 @@ import { installCIInputs } from './ci-inputs.js';
 import { runSessionCompletion } from './completion.js';
 import type { Command, Executor } from './completion.js';
 import { sha256 } from '../package/stage-package.js';
+import { requireRestoredCore } from './ci-core.js';
 
 export interface CIContext {
   kind: 'github-actions-context';
@@ -150,6 +151,7 @@ export async function prepareCI(options: {
   if (process.versions.node !== '24.21.0')
     throw Error('U2 CI Node 24.21.0 required');
   checkHead(root, context.head);
+  await requireRestoredCore(root);
   process.env.npm_config_cache = resolve(
     root,
     '.artifacts/migration-session/npm-cache',

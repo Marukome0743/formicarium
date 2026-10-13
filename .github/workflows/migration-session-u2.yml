@@ -16,13 +16,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: aletheia-works/blink
-          ref: a882fb2f3df14115b7e46f6812fb296eef5934d7
-          path: .vendor/blink
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
@@ -34,6 +27,8 @@ jobs:
       - run: node scripts/ci/tasks.ts build
       - run: node scripts/ci/tasks.ts typecheck
       - run: node --test --test-concurrency=1 tests/migration-session/ci.test.js
+      - name: Restore fixed core objects without network or imported Git configuration
+        run: node scripts/migration-session/ci-core.js ci/migration-session/inputs.bundle.json
       - run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
       - name: Prepare bound payload and independent provisional consumer
         run: node scripts/migration-session/ci.js prepare ci/migration-session/inputs.bundle.json "$RUNNER_TEMP/formicarium-u2-consumer-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" .artifacts/migration-session/ci-context.json
@@ -49,6 +44,7 @@ jobs:
           include-hidden-files: true
           path: |
             .artifacts/migration-session/ci-context.json
+            .artifacts/migration-session/core-restore.json
             .artifacts/migration-session/candidate-*/package.manifest.json
             .artifacts/migration-session/completion-*/local-provisional-report.json
             .artifacts/migration-session/completion-*/ci-job-observations.json
