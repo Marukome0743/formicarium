@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile, } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile, } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { gzipSync } from 'node:zlib';
@@ -9,7 +9,7 @@ import { mapInstallCICommand, validateInstallCIContext, } from '../../scripts/mi
 import { decodeInstallSiteArchive, INSTALL_ACTUAL_SITE_FILES, INSTALL_INPUT_POLICY, INSTALL_SITE_ARCHIVE, INSTALL_SITE_REFERENCE, inspectInstallActualSite, readInstallSiteReference, requireInstallActualSite, validateInstallSiteBudget, validateInstallSiteEntry, validateInstallSiteReferenceManifest, } from '../../scripts/migration-install/ci-inputs.js';
 import { assertInstallTestOutput, executeInstallCommand, installCompletionCommands, isInstallTestCommand, verifyInstallCommandLog, } from '../../scripts/migration-install/completion.js';
 import { assertInstallNodeRealms, INSTALL_REALMS, } from '../../scripts/migration-install/coverage.js';
-import { summarizeInstallTrials } from '../../scripts/migration-install/measure.js';
+import { INSTALL_CONTEXT_OPTIONS, installBrowserLaunch, resolveInstallFirefoxProfile, summarizeInstallTrials, } from '../../scripts/migration-install/measure.js';
 import { CI_INPUT_PATHS, validateCIInputManifest, } from '../../scripts/migration-session/ci-inputs.js';
 import { instrumentPackage, readPlaywrightNodeRealms, } from '../../scripts/package/coverage.js';
 import { PACKAGE_FILES, sha256 } from '../../scripts/package/stage-package.js';
@@ -71,6 +71,60 @@ test('all three generated Playwright Node bootstraps capture real static product
     finally {
         await rm(scratch, { recursive: true, force: true });
     }
+});
+test('U3 Firefox profile is optional, resolved to a real absolute directory with cert9.db, and refused before measurement otherwise', async () => {
+    await mkdir('.artifacts', { recursive: true });
+    const scratch = await mkdtemp(resolve('.artifacts', 'u3-firefox-profile-'));
+    try {
+        const variable = 'FORMICARIUM_INSTALL_FIREFOX_PROFILE';
+        assert.equal(await resolveInstallFirefoxProfile({}), undefined);
+        const profile = resolve(scratch, 'profile');
+        await mkdir(profile);
+        await writeFile(resolve(profile, 'cert9.db'), '');
+        assert.equal(await resolveInstallFirefoxProfile({ [variable]: profile }), await realpath(profile), 'valid profile resolves to its real absolute path');
+        const linked = resolve(scratch, 'linked-profile');
+        await symlink(profile, linked);
+        const plainFile = resolve(scratch, 'plain-file');
+        await writeFile(plainFile, '');
+        const withoutDatabase = resolve(scratch, 'without-database');
+        await mkdir(withoutDatabase);
+        const databaseDirectory = resolve(scratch, 'database-directory');
+        await mkdir(resolve(databaseDirectory, 'cert9.db'), { recursive: true });
+        const databaseLink = resolve(scratch, 'database-link');
+        await mkdir(databaseLink);
+        await symlink(resolve(profile, 'cert9.db'), resolve(databaseLink, 'cert9.db'));
+        for (const [label, value] of [
+            ['empty string', ''],
+            ['relative path', 'relative/profile'],
+            ['missing path', resolve(scratch, 'missing')],
+            ['symlink to profile directory', linked],
+            ['regular file instead of directory', plainFile],
+            ['cert9.db missing', withoutDatabase],
+            ['cert9.db is a directory', databaseDirectory],
+            ['cert9.db is a symlink', databaseLink],
+        ])
+            await assert.rejects(resolveInstallFirefoxProfile({ [variable]: value }), /U3 Firefox profile/, label);
+    }
+    finally {
+        await rm(scratch, { recursive: true, force: true });
+    }
+});
+test('U3 browser launch switches Firefox to the persistent profile only when given and keeps TLS verification on', () => {
+    const firefoxUserPrefs = { 'security.enterprise_roots.enabled': true };
+    assert.deepEqual(installBrowserLaunch('firefox', undefined), {
+        kind: 'launch',
+        options: { firefoxUserPrefs },
+    });
+    assert.deepEqual(installBrowserLaunch('firefox', '/job/firefox-profile'), {
+        kind: 'persistent',
+        userDataDir: '/job/firefox-profile',
+        options: { firefoxUserPrefs, ignoreHTTPSErrors: false },
+    });
+    for (const browserName of ['chromium', 'webkit'])
+        for (const profile of [undefined, '/job/firefox-profile'])
+            assert.deepEqual(installBrowserLaunch(browserName, profile), { kind: 'launch', options: {} }, `${browserName} never uses the Firefox profile`);
+    assert.deepEqual(INSTALL_CONTEXT_OPTIONS, { ignoreHTTPSErrors: false });
+    assert.ok(Object.isFrozen(INSTALL_CONTEXT_OPTIONS));
 });
 function trials() {
     return ['aube', 'biome'].flatMap((tool) => ['chromium', 'firefox', 'webkit'].flatMap((browser) => Array.from({ length: 6 }, (_, trial) => ({

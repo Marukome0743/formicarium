@@ -133,7 +133,7 @@
     },
     {
       "path": ".github/workflows/migration-install-u3.yml",
-      "sha256": "61647550f6c4db4defd34fd36fdb844f9b1a922b11d7823c7eaa5a369a459533"
+      "sha256": "8b2015f65e2fee51cad8a48c08eec6bf57f073d754b5e68b278d8dd1b6731d7b"
     },
     {
       "path": ".github/workflows/migration-session-u2.yml",
@@ -509,11 +509,11 @@
     },
     {
       "path": "scripts/migration-install/measure.js",
-      "sha256": "a848663a25d84ece805c9a722ebc95edab0db0f3252c2645fd70918f36f5c491"
+      "sha256": "7817de0f243e688ebd6140e44a75d2931ee0f3d393d480e8c9b288f375c56e71"
     },
     {
       "path": "scripts/migration-install/measure.ts",
-      "sha256": "0c913ca1fe8e296a045efe67eaacaf9a2bad20c8b99ef345fc23b119a3db3473"
+      "sha256": "3ec645aded169ce2c4f0f61a66f5fcc4aa27142ed0561644cb89a13141b4cb9a"
     },
     {
       "path": "scripts/migration-install/stage.js",
@@ -777,11 +777,11 @@
     },
     {
       "path": "tests/migration-install/acceptance.test.js",
-      "sha256": "b4301dd9ca1f7d80e49d23e61e80d0e9f59dcc0216c46804c6f625dccfc434c8"
+      "sha256": "b57120dd1daf5b86c6bd8f074322e60e5d5df8b0a85b6b7a5f2f2e7425dea7d2"
     },
     {
       "path": "tests/migration-install/acceptance.test.ts",
-      "sha256": "1a5293eeb1e39cf5bab9861aad2e440ecfccd08a523097127ae05d8625e9eddb"
+      "sha256": "6bba627a0db3427bd47a6ccb94b84630a4aa05074c46b50eee7e842d7d8fcc61"
     },
     {
       "path": "tests/migration-install/archive.test.js",

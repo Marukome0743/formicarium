@@ -2,7 +2,7 @@
 /// <reference path="../../tests/migration-session/browser-modules.d.ts" />
 /// <reference path="../../tests/migration-install/browser-modules.d.ts" />
 import { X509Certificate } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -91,6 +91,60 @@ export function summarizeInstallTrials(trials: readonly InstallTrial[]) {
     }
   return groups;
 }
+/** Every per-trial context keeps browser TLS verification enabled. */
+export const INSTALL_CONTEXT_OPTIONS = Object.freeze({
+  ignoreHTTPSErrors: false as const,
+});
+
+/**
+ * Optional job-only Firefox profile whose cert9.db holds the job CA; it is
+ * validated before any server or browser starts. Unset keeps the default launch.
+ */
+export async function resolveInstallFirefoxProfile(env: NodeJS.ProcessEnv) {
+  const value = env.FORMICARIUM_INSTALL_FIREFOX_PROFILE;
+  if (value === undefined) return undefined;
+  if (!value || !isAbsolute(value))
+    throw Error('U3 Firefox profile must be an absolute path');
+  const inspect = (path: string) =>
+    lstat(path).catch((error: unknown) => {
+      throw Error('U3 Firefox profile path is missing', { cause: error });
+    });
+  const directory = await inspect(value);
+  if (!directory.isDirectory() || directory.isSymbolicLink())
+    throw Error('U3 Firefox profile must be a real directory');
+  const database = await inspect(resolve(value, 'cert9.db'));
+  if (!database.isFile() || database.isSymbolicLink())
+    throw Error('U3 Firefox profile cert9.db must be a regular file');
+  return await realpath(value);
+}
+
+type InstallBrowserLaunch =
+  | { kind: 'launch'; options: Parameters<typeof chromium.launch>[0] }
+  | {
+      kind: 'persistent';
+      userDataDir: string;
+      options: {
+        firefoxUserPrefs: Record<string, boolean>;
+        ignoreHTTPSErrors: false;
+      };
+    };
+
+/** Pure launch selection: only Firefox with an explicit profile is persistent. */
+export function installBrowserLaunch(
+  browserName: 'chromium' | 'firefox' | 'webkit',
+  profile?: string,
+): InstallBrowserLaunch {
+  if (browserName !== 'firefox') return { kind: 'launch', options: {} };
+  const firefoxUserPrefs = { 'security.enterprise_roots.enabled': true };
+  if (profile === undefined)
+    return { kind: 'launch', options: { firefoxUserPrefs } };
+  return {
+    kind: 'persistent',
+    userDataDir: profile,
+    options: { firefoxUserPrefs, ignoreHTTPSErrors: false },
+  };
+}
+
 export async function measureInstall(out: string, root = process.cwd()) {
   const input = await consumerInput();
   if (input.candidate.unit !== 'u3-install')
@@ -130,6 +184,7 @@ export async function measureInstall(out: string, root = process.cwd()) {
     certificate.fingerprint256.replaceAll(':', '').toLowerCase() !== fingerprint
   )
     throw Error('formal U3 localhost certificate identity invalid/expired');
+  const firefoxProfile = await resolveInstallFirefoxProfile(process.env);
   const mirror = JSON.parse(
     await readFile(
       resolve(
@@ -237,17 +292,27 @@ export async function measureInstall(out: string, root = process.cwd()) {
       ['firefox', firefox],
       ['webkit', webkit],
     ] as const) {
-      const browser = await engine.launch(
-        browserName === 'firefox'
-          ? { firefoxUserPrefs: { 'security.enterprise_roots.enabled': true } }
-          : {},
-      );
+      const launch = installBrowserLaunch(browserName, firefoxProfile);
+      let persistent:
+        | Awaited<ReturnType<typeof firefox.launchPersistentContext>>
+        | undefined;
+      let browser: Awaited<ReturnType<typeof engine.launch>>;
+      if (launch.kind === 'persistent') {
+        persistent = await firefox.launchPersistentContext(
+          launch.userDataDir,
+          launch.options,
+        );
+        const owner = persistent.browser();
+        if (!owner) {
+          await persistent.close();
+          throw Error('U3 Firefox profile persistent context has no browser');
+        }
+        browser = owner;
+      } else browser = await engine.launch(launch.options);
       try {
         for (const tool of ['aube', 'biome'])
           for (let trial = 0; trial < 6; trial++) {
-            const context = await browser.newContext({
-              ignoreHTTPSErrors: false,
-            });
+            const context = await browser.newContext(INSTALL_CONTEXT_OPTIONS);
             const page = await context.newPage();
             try {
               const response = await page.goto('https://localhost:4182/');
@@ -351,7 +416,8 @@ export async function measureInstall(out: string, root = process.cwd()) {
             }
           }
       } finally {
-        await browser.close();
+        if (persistent) await persistent.close();
+        else await browser.close();
       }
     }
     await checkSource();

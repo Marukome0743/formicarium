@@ -45,36 +45,60 @@ jobs:
       - run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
       - name: Prepare current U3 inputs and independent consumer
         run: node scripts/migration-install/ci.js prepare ci/migration-install/inputs.bundle.json "$RUNNER_TEMP/formicarium-u3-consumer-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" .artifacts/migration-install/ci-context.json
-      - name: Create job-only localhost leaf certificate and explicit trust
+      - name: Create job-only localhost CA, signed leaf certificate and explicit trust
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libnss3-tools
-          mkdir -p .artifacts/migration-install/tls "$HOME/.pki/nssdb"
-          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 -subj '/CN=formicarium-u3-job-localhost' -addext 'subjectAltName=DNS:localhost' -addext 'basicConstraints=critical,CA:FALSE' -addext 'keyUsage=critical,digitalSignature,keyEncipherment' -addext 'extendedKeyUsage=serverAuth' -keyout .artifacts/migration-install/tls/localhost-key.pem -out .artifacts/migration-install/tls/localhost-cert.pem
-          chmod 600 .artifacts/migration-install/tls/localhost-key.pem
-          sudo install -m 644 .artifacts/migration-install/tls/localhost-cert.pem /usr/local/share/ca-certificates/formicarium-u3-job-localhost.crt
+          tls="$GITHUB_WORKSPACE/.artifacts/migration-install/tls"
+          profile="$tls/firefox-profile"
+          mkdir -p "$tls" "$HOME/.pki/nssdb"
+          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 -subj '/CN=formicarium-u3-job-ca' -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' -addext 'keyUsage=critical,keyCertSign' -addext 'nameConstraints=critical,permitted;DNS:localhost' -keyout "$tls/ca-key.pem" -out "$tls/ca-cert.pem"
+          chmod 600 "$tls/ca-key.pem"
+          printf '%s\n' 'subjectAltName=DNS:localhost' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature,keyEncipherment' 'extendedKeyUsage=serverAuth' > "$tls/leaf.ext"
+          openssl req -new -newkey rsa:2048 -nodes -sha256 -subj '/CN=localhost' -keyout "$tls/localhost-key.pem" -out "$tls/localhost.csr"
+          chmod 600 "$tls/localhost-key.pem"
+          openssl x509 -req -sha256 -days 1 -in "$tls/localhost.csr" -CA "$tls/ca-cert.pem" -CAkey "$tls/ca-key.pem" -CAcreateserial -extfile "$tls/leaf.ext" -out "$tls/localhost-cert.pem"
+          rm -- "$tls/ca-key.pem"
+          [[ ! -e "$tls/ca-key.pem" ]]
+          openssl verify -CAfile "$tls/ca-cert.pem" "$tls/localhost-cert.pem"
+          sudo install -m 644 "$tls/ca-cert.pem" /usr/local/share/ca-certificates/formicarium-u3-job-ca.crt
           sudo update-ca-certificates
           certutil -N --empty-password -d "sql:$HOME/.pki/nssdb"
-          certutil -A -d "sql:$HOME/.pki/nssdb" -n formicarium-u3-job-localhost -t 'P,,' -i .artifacts/migration-install/tls/localhost-cert.pem
-          tls_sha="$(openssl x509 -in .artifacts/migration-install/tls/localhost-cert.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')"
+          certutil -A -d "sql:$HOME/.pki/nssdb" -n formicarium-u3-job-ca -t 'C,,' -i "$tls/ca-cert.pem"
+          mkdir "$profile"
+          certutil -N --empty-password -d "sql:$profile"
+          certutil -A -d "sql:$profile" -n formicarium-u3-job-ca -t 'C,,' -i "$tls/ca-cert.pem"
+          [[ -f "$profile/cert9.db" && ! -L "$profile/cert9.db" ]]
+          tls_sha="$(openssl x509 -in "$tls/localhost-cert.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')"
           [[ "$tls_sha" =~ ^[a-f0-9]{64}$ ]]
-          printf 'FORMICARIUM_INSTALL_TLS_CERT=%s/.artifacts/migration-install/tls/localhost-cert.pem\nFORMICARIUM_INSTALL_TLS_KEY=%s/.artifacts/migration-install/tls/localhost-key.pem\nFORMICARIUM_INSTALL_TLS_SHA256=%s\n' "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE" "$tls_sha" >> "$GITHUB_ENV"
+          printf 'FORMICARIUM_INSTALL_TLS_CERT=%s\nFORMICARIUM_INSTALL_TLS_KEY=%s\nFORMICARIUM_INSTALL_TLS_SHA256=%s\nFORMICARIUM_INSTALL_FIREFOX_PROFILE=%s\n' "$tls/localhost-cert.pem" "$tls/localhost-key.pem" "$tls_sha" "$profile" >> "$GITHUB_ENV"
       - name: Sequential suites, fresh21JS allrealms coverage and formal36 trials
         run: node scripts/migration-install/ci.js verify .artifacts/migration-install/ci-context.json
-      - name: Remove only this job localhost trust and private key
+      - name: Remove only this job CA trust, Firefox profile and private keys
         if: always()
         shell: bash
         run: |
-          if [[ -f /usr/local/share/ca-certificates/formicarium-u3-job-localhost.crt ]]; then
-            expected="$(openssl x509 -in .artifacts/migration-install/tls/localhost-cert.pem -noout -fingerprint -sha256)"
-            actual="$(openssl x509 -in /usr/local/share/ca-certificates/formicarium-u3-job-localhost.crt -noout -fingerprint -sha256)"
+          tls="$GITHUB_WORKSPACE/.artifacts/migration-install/tls"
+          crt=/usr/local/share/ca-certificates/formicarium-u3-job-ca.crt
+          if [[ -f "$crt" ]]; then
+            expected="$(openssl x509 -in "$tls/ca-cert.pem" -noout -fingerprint -sha256)"
+            actual="$(openssl x509 -in "$crt" -noout -fingerprint -sha256)"
             [[ "$actual" = "$expected" ]]
-            sudo rm -- /usr/local/share/ca-certificates/formicarium-u3-job-localhost.crt
+            sudo rm -- "$crt"
             sudo update-ca-certificates
-            certutil -D -d "sql:$HOME/.pki/nssdb" -n formicarium-u3-job-localhost
           fi
-          rm -f -- .artifacts/migration-install/tls/localhost-key.pem
+          if certutil -L -d "sql:$HOME/.pki/nssdb" -n formicarium-u3-job-ca >/dev/null 2>&1; then
+            certutil -D -d "sql:$HOME/.pki/nssdb" -n formicarium-u3-job-ca
+          fi
+          rm -rf -- "$tls/firefox-profile"
+          rm -f -- "$tls/localhost-key.pem" "$tls/ca-key.pem"
+          [[ ! -e "$crt" ]]
+          if certutil -L -d "sql:$HOME/.pki/nssdb" -n formicarium-u3-job-ca >/dev/null 2>&1; then
+            echo 'job CA is still present in the NSS database' >&2
+            exit 1
+          fi
+          [[ ! -e "$tls/firefox-profile" && ! -e "$tls/localhost-key.pem" && ! -e "$tls/ca-key.pem" ]]
       - name: Preserve current metadata, raw command logs and all realm/trial observations
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
