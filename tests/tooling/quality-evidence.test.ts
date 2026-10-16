@@ -32,7 +32,7 @@ function fixture() {
     purpose: 'ordinary-ci',
     checks,
     artifactDigest: digest(bytes),
-    toolchainRevision: 'bun1.4.2-node24.21.0-lockdigest',
+    toolchainRevision: 'bun1.4.3-node26.12.0-lockdigest',
   };
   const observed: TrustedEvidenceObservation = {
     ...structuredClone(evidence),

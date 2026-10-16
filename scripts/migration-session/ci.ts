@@ -154,8 +154,8 @@ export async function prepareCI(options: {
   const context: PreparedCI['context'] = localHead
     ? { kind: 'local-preparation', head: localHead, acceptancePassed: false }
     : validateCIContext(process.env);
-  if (process.versions.node !== '24.21.0')
-    throw Error('U2 CI Node 24.21.0 required');
+  if (process.versions.node !== '26.12.0')
+    throw Error('U2 CI Node 26.12.0 required');
   checkHead(root, context.head);
   await requireRestoredCore(root);
   process.env.npm_config_cache = resolve(

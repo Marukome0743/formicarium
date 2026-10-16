@@ -54,7 +54,7 @@ async function bunPath(): Promise<string> {
               }),
             )
               .toString()
-              .trim() === '1.4.2'
+              .trim() === '1.4.3'
           )
             return path;
         } catch {
@@ -62,7 +62,7 @@ async function bunPath(): Promise<string> {
         }
       }
   }
-  throw Error('fixed Bun1.4.2 unavailable');
+  throw Error('fixed Bun1.4.3 unavailable');
 }
 test('tracked policy starts disabled and incomplete immutable identity cannot enable writing', async (t) => {
   await t.test(

@@ -146,7 +146,7 @@ async function bunPath(): Promise<string> {
               }),
             )
               .toString()
-              .trim() === '1.4.2'
+              .trim() === '1.4.3'
           )
             return path;
         } catch {
@@ -154,7 +154,7 @@ async function bunPath(): Promise<string> {
         }
       }
   }
-  throw Error('fixed Bun1.4.2 executable unavailable');
+  throw Error('fixed Bun1.4.3 executable unavailable');
 }
 function tarball(version: string): Buffer {
   const rows = [
@@ -500,7 +500,7 @@ test('dependency zero/two, range, major, prerelease, additions/deletions and Act
   let calls = 0;
   const unused: CommandExecutor = async () => {
     calls++;
-    return encode('1.4.2');
+    return encode('1.4.3');
   };
   const candidates = [
     base,

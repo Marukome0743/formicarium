@@ -427,7 +427,7 @@ export async function reproduceDependency(
     const version = utf8(
       await execute(command(bunExecutable, ['--version'], workspace)),
     );
-    rejectUnless(version.trim() === '1.4.2', 'TOOLCHAIN_MISMATCH');
+    rejectUnless(version.trim() === '1.4.3', 'TOOLCHAIN_MISMATCH');
     await writeFile(join(workspace, 'package.json'), expectedBytes);
     await writeFile(join(workspace, 'bun.lock'), limitBytes(trustedLock));
     if (trustedRegistry) {

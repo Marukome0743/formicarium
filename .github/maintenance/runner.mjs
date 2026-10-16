@@ -1616,9 +1616,9 @@ function normalizeReceipt(raw, archiveBytes, run, pr, jobs, checks, policy) {
   );
   const tools = row(receipt.expectedToolchain);
   fail(
-    tools.node === '24.21.0' &&
-      tools.bun === '1.4.2' &&
-      receipt.receiptNodeVersion === '24.21.0' &&
+    tools.node === '26.12.0' &&
+      tools.bun === '1.4.3' &&
+      receipt.receiptNodeVersion === '26.12.0' &&
       typeof tools.lockDigest === 'string' &&
       /^[a-f0-9]{64}$/.test(tools.lockDigest),
     'TOOLCHAIN_MISMATCH',
@@ -2636,7 +2636,7 @@ async function reproduceDependency(
     const version = utf8(
       await execute(command(bunExecutable, ['--version'], workspace)),
     );
-    rejectUnless(version.trim() === '1.4.2', 'TOOLCHAIN_MISMATCH');
+    rejectUnless(version.trim() === '1.4.3', 'TOOLCHAIN_MISMATCH');
     await writeFile(join(workspace, 'package.json'), expectedBytes);
     await writeFile(join(workspace, 'bun.lock'), limitBytes(trustedLock));
     if (trustedRegistry) {

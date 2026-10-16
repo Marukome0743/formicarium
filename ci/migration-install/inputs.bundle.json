@@ -121,27 +121,27 @@
     },
     {
       "path": ".github/publication/runner-manifest.json",
-      "sha256": "0b37771ff991802b6e5ed2c1128f0729d312b07c6d805da4a51471c01e3231c2"
+      "sha256": "560f411d4c61ae06adda584b00f5d11239b079d94a3e82a614cceb2a7761332e"
     },
     {
       "path": ".github/publication/runner.mjs",
-      "sha256": "410bb9b1508c027d55ffb4e521e6df71b3c13f6d289c369f6a29bf02cd537918"
+      "sha256": "873738ab53f19b255697241c287c0530ca574f2ac550b4f67e309da4f526ecb7"
     },
     {
       "path": ".github/publication/trusted-policy.json",
-      "sha256": "31777237ffd76c78d9e76322ac2817b30d9d92bbc61bf49540d9e82bed38c7b6"
+      "sha256": "447d226822686b162e86be6efd40035084f239efc39028dfb5635a6ed46c8203"
     },
     {
       "path": ".github/workflows/migration-install-u3.yml",
-      "sha256": "8b2015f65e2fee51cad8a48c08eec6bf57f073d754b5e68b278d8dd1b6731d7b"
+      "sha256": "a2b5b1b2badf4b5303457da16f12e6f554b79e48e9fb6db53498cb43969badf6"
     },
     {
       "path": ".github/workflows/migration-session-u2.yml",
-      "sha256": "7e84dca028cbe759d1e7a4fb4f5ea5fc5b071e32ff306a1aa56dad97bd2b5c57"
+      "sha256": "55814606d7e0cb649baa0d76eaf8e0054fe080e01e9ddaa0b31c9364a80d611c"
     },
     {
       "path": "README.md",
-      "sha256": "629c043b797cbed85c291a9219f42d49c0455ed03954d30588f4441a6f0652ff"
+      "sha256": "410d260da0f987354c95870e4f90e22f3b1a881e3b4dad6e7fe309c44aab8e80"
     },
     {
       "path": "blink.lock",
@@ -153,11 +153,11 @@
     },
     {
       "path": "mise.toml",
-      "sha256": "8b2b3b7e80efabecd543a7bd55d48c523b4c82f8ef3b60c645ae19691b624263"
+      "sha256": "84892557ef9952a7fa0da8a401aabf18204dc0e97e9cd2e310140bcbeec6067d"
     },
     {
       "path": "package.json",
-      "sha256": "39bece535cd9c3a0cf6ef553588ed79ce3549373a58486cd12196cb67f16eafa"
+      "sha256": "9929220d902af1885cfb5f2ed6bcc295820f4a82b56abd55f3e6064ccd19fd48"
     },
     {
       "path": "runtime/contracts.js",
@@ -437,11 +437,11 @@
     },
     {
       "path": "scripts/ci/ordinary-receipt.js",
-      "sha256": "f6fde73f64e15ec5369eb3c601021c93434b0f625f5265de3bd2d915a3160d59"
+      "sha256": "215a75181c3638e497c7fa66b50105a393f1f2aa56ad43d5e5d433f13d56fcb4"
     },
     {
       "path": "scripts/ci/ordinary-receipt.ts",
-      "sha256": "51d156df70b3f2a9dbdd504d94253dd38f21d07dfd95b97b5dfe1c1d7481acdf"
+      "sha256": "f514dacddb001105fc45d7bcf29eee65782c1125b8a4856f0c065ea4d5bde080"
     },
     {
       "path": "scripts/ci/quality-evidence.js",
@@ -461,11 +461,11 @@
     },
     {
       "path": "scripts/ci/tasks.js",
-      "sha256": "c7645037982fe32ad7069def6de633899b4b24e166504fcd9ca3552d65194548"
+      "sha256": "ed96ba922d5ccd9d426f4b01c9ca11264f844ac359c112bf58760ca3f906c81a"
     },
     {
       "path": "scripts/ci/tasks.ts",
-      "sha256": "25433b741c5b602c50b71e558abfc242bf6cf3b2d7f2e198d3497b75876726f2"
+      "sha256": "99f8e1690f4d5e7961e4ed0e009bcc44b2c6a32fcf17b23d12929ed619ddd2a9"
     },
     {
       "path": "scripts/ci/verification.js",
@@ -485,11 +485,11 @@
     },
     {
       "path": "scripts/migration-install/ci.js",
-      "sha256": "ad0bec26607fecd44e295fe7438e226d12bde920d0da8ce02b7c8a59309ce75e"
+      "sha256": "17c9134e8ee75bd9c6ee4d44dc74f2b0c8609dd4d3f09e5a35df89d96e539d79"
     },
     {
       "path": "scripts/migration-install/ci.ts",
-      "sha256": "0fc6231853c26b8653208ff989df616df6fd965590403c3137fbd05586c242ca"
+      "sha256": "a3db1a5a970a95ebfffbcc950bfdee4b6f36d51aeab30114a3503b63f124bb41"
     },
     {
       "path": "scripts/migration-install/completion.js",
@@ -541,11 +541,11 @@
     },
     {
       "path": "scripts/migration-session/ci.js",
-      "sha256": "08f29dd32b975230908883f1ecd373cde7fb7fd848a1931b70f568e11107b054"
+      "sha256": "2410e4d3742c1f9493910e6c0de27d7f63b5bac7595f7e7d0fab1d5d052382b5"
     },
     {
       "path": "scripts/migration-session/ci.ts",
-      "sha256": "9bbf6eb305d4c06fc57672cc307d1118b35625fd2ce2313dbc2ac911b2078a7d"
+      "sha256": "5f8ce4663aa104efedb1df8d70efa99582ffd78cf147ad2cbfb27bc58e0c4da4"
     },
     {
       "path": "scripts/migration-session/completion.js",
@@ -617,11 +617,11 @@
     },
     {
       "path": "scripts/release/bundle.js",
-      "sha256": "8a6e83261c7b6a4b2d2861e9d615c9257a670d00001e0ed723aeb0e03f5098a2"
+      "sha256": "b546a67cdf5b968da97d97f4373f2af57faf574d6c37b30024b1e1e12fbb300a"
     },
     {
       "path": "scripts/release/bundle.ts",
-      "sha256": "4eb942b9d4abfd8d1019cea29e328e3413bbfb195a75ac1344716085e31e2c61"
+      "sha256": "5bbbd67a0badef7b7af3a7169f96744fe86b189eb55dec5f86d7f5b5bb9a6012"
     },
     {
       "path": "scripts/release/collect.js",
@@ -673,11 +673,11 @@
     },
     {
       "path": "scripts/release/publication-evidence.js",
-      "sha256": "2d7908285f08eb9947a888bc8701a734726804a74635ff393d80f1836ab405df"
+      "sha256": "65deb10ca8df72f2e7ebefbe4c31fb4d1b1bd6c43db10ebc0561bcd870bd86d7"
     },
     {
       "path": "scripts/release/publication-evidence.ts",
-      "sha256": "547489b4f3bfae1bddecaf40f1184c07e659c0756edf96ac03e5b8e651b020e9"
+      "sha256": "44ec8fde154138a07a36c4b33c2835e47bcb113b70a876233d5b6c511cc55540"
     },
     {
       "path": "scripts/release/publication.js",
@@ -861,11 +861,11 @@
     },
     {
       "path": "tests/migration-install/runner-ready.test.js",
-      "sha256": "80c0d2efa0ed024c9306b55a3ba99891e1bbeac420af4a92d258bf3f2578a2f0"
+      "sha256": "cfd1668d7b2f1543e01613f9ae856dde22c875b08fd0a818ac554f11de3eb88b"
     },
     {
       "path": "tests/migration-install/runner-ready.test.ts",
-      "sha256": "97ba983219e3b522a9c72157e217a844f5ff90cea41cd883361b8f81d0e30798"
+      "sha256": "5c5005c07216fe1c8eb45af08a7b4d52e4d74272a1e507d56c8953f716da61ce"
     },
     {
       "path": "tests/migration-install/transfer.test.js",
@@ -1297,11 +1297,11 @@
     },
     {
       "path": "tests/package/runner-ready.test.js",
-      "sha256": "eac5a49b5da444b8acd8fa8a98edf25a11d3055cbba66fea9f694eba562e9070"
+      "sha256": "23d667ce6b11eab48b02af45857790cfb793ec11cda0a9867ede408a62834a61"
     },
     {
       "path": "tests/package/runner-ready.test.ts",
-      "sha256": "6e843ac68dc1eb73b4459711268dfca27952d0a72b321a9b1701fb858d249997"
+      "sha256": "8e53eeed52eb66f5d1a249e1a28f6675fb94cd35c40bcda2296936c4415e68c8"
     },
     {
       "path": "tests/package/state.test.js",

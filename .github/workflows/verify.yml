@@ -19,10 +19,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24.21.0'
+          node-version: '26.12.0'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.2'
+          bun-version: '1.4.3'
       - run: npm ci --ignore-scripts
       - run: node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/typescript/bin/tsc -p tsconfig.tests.json && node .build/scripts/emit.js
       - run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit

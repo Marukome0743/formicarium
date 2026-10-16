@@ -8,9 +8,9 @@
     "repository": "aletheia-works/formicarium",
     "workflowId": null,
     "workflowPath": ".github/workflows/ci.yml",
-    "workflowDigest": "9f77cb1f9d545bc73a2f706c9691c94939ff0e5d72aa83fd460929d291bcf417",
+    "workflowDigest": "8c1a2379b050ac1a8a3a99d3aca912c4e911d04a0a1d36d6d32017162908979f",
     "producerAppId": null,
-    "toolchainRevision": "bun1.4.2-node24.21.0",
+    "toolchainRevision": "bun1.4.3-node26.12.0",
     "protectedPaths": [
       ".github",
       ".github/workflows/ci.yml",

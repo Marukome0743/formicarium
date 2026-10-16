@@ -200,9 +200,9 @@ export function normalizeReceipt(
   );
   const tools = row(receipt.expectedToolchain);
   fail(
-    tools.node === '24.21.0' &&
-      tools.bun === '1.4.2' &&
-      receipt.receiptNodeVersion === '24.21.0' &&
+    tools.node === '26.12.0' &&
+      tools.bun === '1.4.3' &&
+      receipt.receiptNodeVersion === '26.12.0' &&
       typeof tools.lockDigest === 'string' &&
       /^[a-f0-9]{64}$/.test(tools.lockDigest),
     'TOOLCHAIN_MISMATCH',

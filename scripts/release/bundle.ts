@@ -24,7 +24,7 @@ export async function publicationBundles(
   generate = false,
 ) {
   if (
-    run(bun, ['--version'], root) !== '1.4.2' ||
+    run(bun, ['--version'], root) !== '1.4.3' ||
     run(biome, ['--version'], root) !== 'Version: 2.5.15'
   )
     throw Error('BUNDLE_TOOLCHAIN_MISMATCH');

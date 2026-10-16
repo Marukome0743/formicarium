@@ -39,14 +39,14 @@ async function bunPath() {
         try {
           await access(path);
           const result = spawnSync(path, ['--version'], { encoding: 'utf8' });
-          if (result.status === 0 && result.stdout.trim() === '1.4.2')
+          if (result.status === 0 && result.stdout.trim() === '1.4.3')
             return path;
         } catch {
           /*Only fixed installed executable.*/
         }
       }
   }
-  throw Error('fixed Bun1.4.2 unavailable');
+  throw Error('fixed Bun1.4.3 unavailable');
 }
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'publication-bundle-fixture-'));

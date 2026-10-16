@@ -5,7 +5,7 @@
   "description": "blink（x86-64 Linux ユーザーモードエミュレータ）を wasm 上で動かす PoC",
   "license": "Apache-2.0",
   "type": "module",
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.3",
   "trustedDependencies": [],
   "files": [
     "runtime/public.js",
@@ -82,7 +82,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
-    "@playwright/test": "1.63.0",
+    "@playwright/test": "1.64.1",
     "@types/istanbul-lib-coverage": "^2.0.6",
     "@types/istanbul-lib-instrument": "^1.7.8",
     "@types/node": "^24.19.1",

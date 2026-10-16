@@ -6,7 +6,7 @@
     "workflowIdentity": ".github/workflows/candidate-verify.yml",
     "workflowId": null,
     "producerAppId": null,
-    "toolchainRevision": "bun1.4.2-node24.21.0",
+    "toolchainRevision": "bun1.4.3-node26.12.0",
     "requiredChecks": ["candidate-required"],
     "archiveRedirectHosts": []
   },

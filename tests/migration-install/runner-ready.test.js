@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-test('U3 runner executes Node 24 ESM with web stream primitives', async () => {
-    assert.equal(process.versions.node, '24.21.0');
+test('U3 runner executes Node 26 ESM with web stream primitives', async () => {
+    assert.equal(process.versions.node, '26.12.0');
     assert.equal(typeof import.meta.url, 'string');
     const response = new Response(new Uint8Array([127, 69, 76, 70]));
     assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [127, 69, 76, 70]);
@@ -12,7 +12,7 @@ test('U3 runner executes Node 24 ESM with web stream primitives', async () => {
 test('U3 runner keeps independent consumer exports and fixed development inputs', async () => {
     const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
     assert.equal(manifest.type, 'module');
-    assert.equal(manifest.packageManager, 'bun@1.4.2');
+    assert.equal(manifest.packageManager, 'bun@1.4.3');
     assert.equal(manifest.exports['.'].import, './runtime/public.js');
     assert.equal(manifest.exports['.'].types, './types/index.d.ts');
     const lock = await readFile(new URL('../../blink.lock', import.meta.url), 'utf8');

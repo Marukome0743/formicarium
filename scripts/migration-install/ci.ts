@@ -112,8 +112,8 @@ export async function prepareInstallCI(options: {
 }) {
   const root = await realpath(options.root);
   const head = actualHead(root);
-  if (!/^[a-f0-9]{40}$/.test(head) || process.versions.node !== '24.21.0')
-    throw Error('U3 CI actualhead/Node24.21.0 required');
+  if (!/^[a-f0-9]{40}$/.test(head) || process.versions.node !== '26.12.0')
+    throw Error('U3 CI actualhead/Node26.12.0 required');
   const context: Prepared['context'] = options.localPreparation
     ? { kind: 'local-preparation', head, acceptancePassed: false }
     : validateInstallCIContext(process.env);

@@ -15,7 +15,7 @@ test('U1 tool dependencies match the lockfile', async () => {
   const bun = process.env.FORMICARIUM_CI_BUN ?? 'bun';
   assert.equal(
     execFileSync(bun, ['--version'], { encoding: 'utf8', shell: false }).trim(),
-    '1.4.2',
+    '1.4.3',
   );
   // Bun's native JSONC parser handles its generated lock format. Feed bytes
   // through stdin, never interpolate lock contents into executable code.

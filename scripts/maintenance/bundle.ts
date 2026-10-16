@@ -28,7 +28,7 @@ export async function verifyRunnerBundle(
     )
       .toString()
       .trim();
-    if (version !== '1.4.2') throw new BoundaryError('TOOLCHAIN_MISMATCH');
+    if (version !== '1.4.3') throw new BoundaryError('TOOLCHAIN_MISMATCH');
     const biomeVersion = Buffer.from(
       await executeCommand({
         executable: biomeExecutable,

@@ -46,7 +46,7 @@ test('developer entry rejects either non-pinned runtime before executing work', 
         nodeVersion: '26.0.0',
         execute: () => ({ status: 0 }),
       }),
-    /Node 24.21.0/,
+    /Node 26.12.0/,
   );
   assert.throws(
     () =>
@@ -55,7 +55,7 @@ test('developer entry rejects either non-pinned runtime before executing work', 
         nodeVersion: TOOLCHAIN.node,
         execute: () => ({ status: 0, stdout: '1.4.1' }),
       }),
-    /Bun 1.4.2/,
+    /Bun 1.4.3/,
   );
 });
 test('task failures and interrupted tasks propagate nonzero results', () => {
@@ -108,6 +108,6 @@ test('all C1 logical task names have developer commands and unknown tasks fail',
 test('dependency install scripts are disabled rather than trusting Bun defaults', async () => {
   const manifest = JSON.parse(await readFile(resolve('package.json'), 'utf8'));
   assert.deepEqual(manifest.trustedDependencies, []);
-  assert.equal(manifest.packageManager, 'bun@1.4.2');
+  assert.equal(manifest.packageManager, 'bun@1.4.3');
   assert.ok(taskArguments('install-frozen').includes('--ignore-scripts'));
 });

@@ -101,7 +101,7 @@ function fixture() {
     workflowPath: '.github/workflows/ci.yml',
     workflowDigest: digest(workflow),
     producerAppId: 22,
-    toolchainRevision: 'bun1.4.2-node24.21.0',
+    toolchainRevision: 'bun1.4.3-node26.12.0',
     protectedPaths: ['.github/workflows/ci.yml', 'scripts/release'],
     archiveRedirectHosts: ['archive.blob.core.windows.net'],
     updateActorId: 33,
@@ -154,10 +154,10 @@ function fixture() {
     workflowIdentity: policy.workflowPath,
     workflowRef: `owner/repo/${policy.workflowPath}@refs/pull/7/merge`,
     purpose: 'ordinary-ci',
-    receiptNodeVersion: '24.21.0',
+    receiptNodeVersion: '26.12.0',
     expectedToolchain: {
-      node: '24.21.0',
-      bun: '1.4.2',
+      node: '26.12.0',
+      bun: '1.4.3',
       lockDigest: 'c'.repeat(64),
     },
     observedJobs: REQUIRED_JOBS.slice(0, 2).map((name) => ({
@@ -390,7 +390,7 @@ async function bunPath(): Promise<string> {
               }),
             )
               .toString()
-              .trim() === '1.4.2'
+              .trim() === '1.4.3'
           )
             return path;
         } catch {
@@ -398,7 +398,7 @@ async function bunPath(): Promise<string> {
         }
       }
   }
-  throw Error('fixed Bun1.4.2 executable unavailable');
+  throw Error('fixed Bun1.4.3 executable unavailable');
 }
 function tarball(version: string): Buffer {
   const rows = [
