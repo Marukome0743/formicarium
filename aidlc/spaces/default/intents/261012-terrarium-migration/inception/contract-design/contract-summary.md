@@ -115,10 +115,11 @@ interface SessionPort {
     options: Omit<RunOptions, 'guest' | 'args'>): Promise<RunResult>;
   builtin(r: Reservation, argv: readonly string[]): Promise<CommandResult>;
   release(r: Reservation): Promise<void>;
+  resolvePath(path: string): string;
 }
 ```
 
-予約は待ち行列に入れずactiveがあればBUSY。既存直接Session.run/readFile/remove/listEntries/setCwdと新経路も同一所有者の排他を使用し、二重acquireはしない。C02呼出しは予約済み操作の内部継続で、公開runを再帰呼出ししない。commitGuestは内部所有の検証済みhandleのみ受け付ける。token/epoch/activeが一致する場合だけ置換、取消/旧epochはABORTED、disposedはDISPOSED。失敗commitは旧登録不変。releaseはtoken一致だけでactive解放し、旧予約が新予約を消さない。reset/disposeはepochを増やし、進行中のfetch/Workerを中止してcleanup完了を待ち、guest登録を全消去する。FS/cwdのresetは既存公開Sessionの初期状態復元の意味を維持する。dispose後はresetもDISPOSED。runの出力/FS commitは既存成功・失敗契約を維持し、導入失敗で既存FS/cwdを変更しない。
+予約は待ち行列に入れずactiveがあればBUSY。既存直接Session.run/readFile/remove/listEntries/setCwdと新経路も同一所有者の排他を使用し、二重acquireはしない。C02呼出しは予約済み操作の内部継続で、公開runを再帰呼出ししない。commitGuestは内部所有の検証済みhandleのみ受け付ける。token/epoch/activeが一致する場合だけ置換、取消/旧epochはABORTED、disposedはDISPOSED。失敗commitは旧登録不変。releaseはtoken一致だけでactive解放し、旧予約が新予約を消さない。reset/disposeはepochを増やし、進行中のfetch/Workerを中止してcleanup完了を待ち、guest登録を全消去する。FS/cwdのresetは既存公開Sessionの初期状態復元の意味を維持する。dispose後はresetもDISPOSED。resolvePathは予約を取らず状態を変えない同期の読取りで、相対pathを現在のcwdに付けて既存のpath正規化規則で正規化した絶対pathを返し、空・`..`・NUL・文字列でない値は同期でINVALID_INPUTを投げる。戻り値は呼出し時点のcwdにもとづき、dispose・reset・abortは検査しないため、呼出し側は予約保持中か同じtickのうちに使う（2026-10-17、U2 functional-designの再開で追記）。runの出力/FS commitは既存成功・失敗契約を維持し、導入失敗で既存FS/cwdを変更しない。
 
 ## C03: 公開guest/fixture検証
 

@@ -12,8 +12,8 @@ template="${PREFLIGHT_INPUT_TEMPLATE:?fixed build-input template required}"
 inputs="${PREFLIGHT_ACTUAL_INPUTS:?new actual input path required}"
 cache="${PREFLIGHT_CACHE:?cache directory required}"
 source="${PREFLIGHT_SOURCE:?full-commit checkout Action directory required}"
-if [[ "$(node --version)" != "v24.21.0" ]]; then
-  echo 'Node v24.21.0 is required' >&2
+if [[ "$(node --version)" != "v26.12.0" ]]; then
+  echo 'Node v26.12.0 is required' >&2
   exit 1
 fi
 # Actual rustc/cargo strings come from the immutable image, never placeholders.

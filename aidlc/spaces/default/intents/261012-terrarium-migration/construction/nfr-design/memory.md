@@ -2,6 +2,7 @@
 > This file is kept up to date automatically while the stage runs. Add observations at the review step, not by editing here directly.
 
 ## Interpretations
+- 2026-10-16T20:35:18Z [unit u4-command] — 機能設計とNFR要件のレビューで後工程扱いにしたMinorを、D1–D5で具体化した。孤立surrogateはINVALID_INPUT。lsは表示文字列順に並べる（a.b が a/ より先）。予約前のabortはABORTED、同期builtinは中断しない。guest runはtimeoutMsを渡さない。commandIdは任意。予約名はJSDocとdocsに明記する。UI条件の受渡しを明記する。browserのbuild番号は実行時に記録する。機能設計traceabilityのFR4欠落はCode Generationの計画で扱う。
 2026-10-12T23:21:11Z — [unit u2-session-guest-api] 入力所有権と予約epochの検証位置を具体化。CI最小権限・未信頼PR公開拒否を維持条件として明示し、U2が新しいworkflow/publish権限を持つとは扱わない。
 <!-- example: 2026-05-29T10:14:32Z — chose REST over GraphQL; the consuming team only needs CRUD, revisit if subscriptions land -->
 
@@ -13,4 +14,5 @@
 <!-- example: 2026-05-29T10:14:32Z — picked TDD over BDD this run; the team is unit-first and the domain is well-understood -->
 
 ## Open questions
+- 2026-10-16T20:37:00Z [unit u4-command] — レビューREADY（Minor 4件）。凍結のまま、U4 Code Generation計画へ反映する：(1) 孤立surrogateの検出方法を1つに決める（`String.prototype.isWellFormed()` を使い、Node/browserで同じ判定にする）。(2) lsの並べ替えは、NFR設計D4（表示文字列順）が機能設計W6（名前順）より優先すると計画に明記する。(3) 判定の順序はINVALID_INPUT（予約前の検証）→ABORTED（事前abort）→予約時のDISPOSED/BUSYとし、試験で固定する。(4) `install ls@x` のように予約名のtoolを登録できる件は、JSDocだけでなくdocsと試験でも示す。
 <!-- example: 2026-05-29T10:14:32Z — confirm the retention window with compliance before the next stage hardens the schema -->

@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { consumerInput } from '../../tests/migration-session/consumer-input.js';
 import { prepareSessionCoverage, SESSION_REALMS, } from '../migration-session/coverage.js';
 import { reportCoverage } from '../package/coverage.js';
+import { INSTALL_REGRESSION_UNITS } from './stage.js';
 /** Fresh U2+U3 collection, never an import of a completed U2 coverage result. */
 export const INSTALL_REALMS = Object.freeze({
     nodeWorkers: SESSION_REALMS.nodeWorkers + 2,
@@ -29,7 +30,7 @@ export function assertInstallNodeRealms(rows) {
 }
 export async function prepareInstallCoverage(out, root = process.cwd()) {
     const input = await consumerInput();
-    if (input.candidate.unit !== 'u3-install')
+    if (!INSTALL_REGRESSION_UNITS.includes(input.candidate.unit))
         throw Error('U3 coverage requires current U3 candidate');
     await prepareSessionCoverage(out, root);
     await cp(resolve(root, 'tests/migration-install'), resolve(out, 'tests/migration-install'), { recursive: true });
@@ -72,8 +73,8 @@ export async function reportInstallCoverage(out, browserResults, candidatePath) 
     assertInstallNodeRealms(JSON.parse(await readFile(resolve(out, 'coverage-session-node.json'), 'utf8')));
     const boundary = JSON.parse(await readFile(resolve(out, 'install-collection-boundary.json'), 'utf8'));
     const candidate = JSON.parse(await readFile(candidatePath, 'utf8'));
-    if (candidate.unit !== 'u3-install' ||
-        boundary.unit !== 'u3-install' ||
+    if (!INSTALL_REGRESSION_UNITS.includes(candidate.unit) ||
+        !INSTALL_REGRESSION_UNITS.includes(boundary.unit) ||
         boundary.candidateSha256 !== candidate.tarball.sha256 ||
         boundary.sourceIdentity !== candidate.sourceIdentity ||
         boundary.originalCompletedU2ProofImported !== false ||

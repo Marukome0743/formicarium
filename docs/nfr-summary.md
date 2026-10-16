@@ -7,6 +7,12 @@ formicarium の PoC（2026-10-05 完了）で定めた非機能要件と品質�
 **性能の合格基準はない。** 計測（FR6）は、JIT の開発を後回しにするかどうかを判断する材料として行うもので、
 閾値は計測の後にユーザーが決める、という位置づけだった（→ 後回しに決定。[`results/jit-decision.md`](results/jit-decision.md)）。
 
+## 現行ツールチェーン（2026-10-08追記）
+
+ドキュメント根拠：最新mainのauthoringはTypeScript（`.ts`）、formatter/linterはBiomeです。`npm ci` 後に `npm run build` がTypeScriptをコンパイルし、`scripts/emit.ts` が実行用 `.js` を配置します。`npm run check` と `npm run typecheck` が静的検証です。Nodeのテストはビルド後の `tests/node/*.test.js` を `node --test` で実行し、Playwrightは `tests/browser/*.spec.ts` と `playwright.config.ts` を使います。コア依存の境界はauthoring `runtime/core.ts`／配布 `runtime/core.js` です。npm候補U1の固定第一者配布JSは `runtime/contracts.js` を含む14ファイルです。
+
+以下のPoC結果と測定値は2026-10-05の履歴です。当時の `.mjs` パスやコマンドを現行の実行手順として使わず、現在は対応する `.ts` ソース／生成 `.js` を参照してください。新候補の検証記録は `aidlc/spaces/default/intents/261006-npm-terrarium-release/construction/u1-runtime-package/code-generation/main-verification.md` に分離します。
+
 ## 1. 非機能要件と判定
 
 | ID | 要件 | 判定 | 根拠 |
@@ -28,12 +34,12 @@ formicarium の PoC（2026-10-05 完了）で定めた非機能要件と品質�
 
 | 項目 | 値 | 場所 |
 |---|---|---|
-| probe 1 回の上限 | 600 秒 | `tests/browser/probe.spec.mjs`、`tests/node/probe.test.mjs` |
-| aube #1645 の上限 | 840 秒（ブラウザ） | `tests/browser/aube-1645.spec.mjs` |
-| 並列数 | worker 1（逐次） | `playwright.config.mjs` |
+| probe 1 回の上限 | 600 秒 | `tests/browser/probe.spec.ts`、`tests/node/probe.test.ts` |
+| aube #1645 の上限 | 840 秒（ブラウザ） | `tests/browser/aube-1645.spec.ts` |
+| 並列数 | worker 1（逐次） | `playwright.config.ts` |
 | 再試行 | 0（失敗を再試行で隠さない） | 実行時の `--retries=0` |
 | 合格条件 | probe の全 8 項目の合格、aube の native との一致 | 各テスト |
-| ゲストのメモリ | 1 GB まで（wasm メモリの上限） | `scripts/build-blink-wasm.sh`、`tests/node/build.test.mjs` が固定 |
+| ゲストのメモリ | 1 GB まで（wasm メモリの上限） | `scripts/build-blink-wasm.sh`、`tests/node/build.test.ts` が固定 |
 
 ## 4. 計測の要点（合否ではなく判断材料）
 
@@ -57,7 +63,7 @@ formicarium の PoC（2026-10-05 完了）で定めた非機能要件と品質�
 | 項目 | 状態 | 根拠 |
 |---|---|---|
 | blink の取得元 | jart/blink の fork（`aletheia-works/blink`）だけを使い、コミットを `blink.lock` で固定する。マルウェア混入の履歴がある fork（webix、portabox、lanmower/blink）は使わない | `blink.lock`、`scripts/fetch-blink.sh`（コミットが一致しなければ止まる） |
-| ブラウザで実行するもの | ゲストと手順は許可リストに載ったものだけ。URL のパラメータは許可リストと照合してから使う | `runtime/web/sessions.mjs` |
+| ブラウザで実行するもの | ゲストと手順は許可リストに載ったものだけ。URL のパラメータは許可リストと照合してから使う | `runtime/web/sessions.ts` |
 | ネットワーク | ブラウザ版はゲストのネットワークを使わない（`socket()` は `EAFNOSUPPORT`） | fork の `50bc466` |
 | 秘密情報 | ビルドにも実行にも使わない。fork への push だけに GitHub の認証が要る | `build-instructions.md` |
 | 依存の脆弱性 | 依存は `@playwright/test` だけ。`npm audit` で 0 件（2026-10-05 に再確認） | 確認方法は `construction/build-and-test/security-test-instructions.md` |

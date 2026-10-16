@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  truncate,
+  writeFile,
+} from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 import type { BaselineInputs } from '../../scripts/migration-preflight/baseline.js';
@@ -230,6 +237,55 @@ test('tampered ELF or metadata refuses reuse rather than silently recompiling', 
       JSON.stringify(metadata),
     );
     await assert.rejects(readAccepted(accepted, value), /identity/);
+  }));
+test('cached metadata with duplicate keys, escaped aliases or over 1 MiB refuses reuse', async () =>
+  scratch(async (cache) => {
+    const value = inputs();
+    await runBaseline({ inputs: value, cache, build });
+    const accepted = resolve(cache, baselineKey(value));
+    const path = resolve(accepted, 'build-info.json');
+    const original = (await readFile(path)).toString('utf8');
+    assert.equal((await readAccepted(accepted, value)).compileSkipped, true);
+    const variants = [
+      original.replace('{', '{"tool":"evil",'),
+      original.replace('{', '{"t\\u006fol":"evil",'),
+      original + ' '.repeat(1024 * 1024 + 1 - Buffer.byteLength(original)),
+    ];
+    for (const variant of variants) {
+      await writeFile(path, variant);
+      await assert.rejects(
+        readAccepted(accepted, value),
+        /duplicate JSON key|metadata exceeds 1 MiB/,
+      );
+      await assert.rejects(
+        runBaseline({
+          inputs: value,
+          cache,
+          build,
+          checkVersion: async () => 0,
+        }),
+        /duplicate JSON key|metadata exceeds 1 MiB/,
+      );
+    }
+    await writeFile(
+      path,
+      original + ' '.repeat(1024 * 1024 - Buffer.byteLength(original)),
+    );
+    assert.equal((await readAccepted(accepted, value)).compileSkipped, true);
+    await writeFile(path, original);
+    assert.equal((await readAccepted(accepted, value)).compileSkipped, true);
+  }));
+test('oversized cached metadata is refused from its size before the file is read', async () =>
+  scratch(async (cache) => {
+    const value = inputs();
+    await runBaseline({ inputs: value, cache, build });
+    const accepted = resolve(cache, baselineKey(value));
+    // A sparse 3 GiB file: reading it whole would fail with a size error, not the limit.
+    await truncate(resolve(accepted, 'build-info.json'), 3 * 1024 ** 3);
+    await assert.rejects(
+      readAccepted(accepted, value),
+      /metadata exceeds 1 MiB/,
+    );
   }));
 test('partial accepted artifact and failed reused version are hard failures', async () =>
   scratch(async (cache) => {

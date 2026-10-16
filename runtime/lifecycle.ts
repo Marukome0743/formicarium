@@ -62,7 +62,7 @@ function spawnErrorCode(error: unknown): ErrorCode {
 import type { ExecutionError } from './errors.js';
 import { failure, safeCause } from './errors.js';
 import { identity, inspectMessage, joinBytes } from './protocol.js';
-import { validateRun } from './validation.js';
+import { normalizePath, validateRun } from './validation.js';
 
 let nextSessionId = 0;
 const defaultClock = () => globalThis.performance?.now() ?? Date.now();
@@ -423,6 +423,15 @@ export function createLifecycle(
         stderr: new Uint8Array(),
       };
     }),
+    resolvePath: (path: string) => {
+      invalid(
+        typeof path === 'string' && path !== '',
+        'path must be non-empty',
+      );
+      return normalizePath(
+        path.startsWith('/') ? path : `${state.cwd}/${path}`,
+      );
+    },
   });
   return session;
 }

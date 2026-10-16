@@ -217,6 +217,38 @@ test('reserved builtin failures preserve FS/cwd and successful operations use th
     await port.release(r);
     assert.equal((await session.readFile('/work/seed'))[0], 7);
 });
+test('resolvePath resolves relative, "." and absolute paths against the current cwd', async () => {
+    const { port, session } = fixture();
+    assert.equal(port.resolvePath('seed'), '/work/seed');
+    assert.equal(port.resolvePath('./sub//x'), '/work/sub/x');
+    assert.equal(port.resolvePath('.'), '/work');
+    assert.equal(port.resolvePath('/root/./a'), '/root/a');
+    assert.equal(port.resolvePath('/'), '/');
+    await session.setCwd('/work/sub');
+    assert.equal(port.resolvePath('x'), '/work/sub/x');
+    assert.equal(port.resolvePath('.'), '/work/sub');
+    assert.equal(port.resolvePath('/work/seed'), '/work/seed');
+    await session.reset();
+    assert.equal(port.resolvePath('x'), '/work/x');
+});
+test('resolvePath rejects empty, "..", NUL and non-string paths and leaves state unchanged', async () => {
+    const { port, session, state } = fixture();
+    await session.setCwd('/work/sub');
+    for (const path of ['', '..', '../seed', 'a/../b', '/work/..', 'a\0b', 7])
+        assert.throws(() => port.resolvePath(path), {
+            code: 'INVALID_INPUT',
+        });
+    assert.equal(state.cwd, '/work/sub');
+    assert.equal((await session.readFile('/work/seed'))[0], 7);
+    // Resolution takes no reservation: a held one stays held and usable.
+    const r = await port.acquire('fs');
+    assert.equal(port.resolvePath('y'), '/work/sub/y');
+    await assert.rejects(port.acquire('run'), { code: 'BUSY' });
+    await port.builtin(r, ['cd', port.resolvePath('/work')]);
+    const cat = await port.builtin(r, ['cat', port.resolvePath('seed')]);
+    assert.equal(cat.stdout[0], 7);
+    await port.release(r);
+});
 test('two sessions sharing a validated handle keep independent registrations and files', async () => {
     const first = fixture();
     const second = fixture();

@@ -9,6 +9,8 @@
 /integration/**/*.js
 /tests/**/*.js
 **/*.js.map
+!/scripts/migration-preflight/current-coverage.js
+!/tests/migration-preflight/current-completion.test.js
 
 # U2 generated JavaScript retained as source review evidence (exact paths only).
 !/runtime/guest-validation.js
@@ -120,6 +122,7 @@ aidlc/.aidlc-unit-merges/
 aidlc/.aidlc-active-space-*.tmp
 aidlc/active-memory/
 aidlc/.aidlc-sessions/
+aidlc/.aidlc-request-text/
 aidlc/spaces/*/intents/.aidlc-*
 **/aidlc/spaces/*/intents/**/.aidlc-engine/
 **/aidlc/spaces/*/intents/**/.aidlc-sensors/

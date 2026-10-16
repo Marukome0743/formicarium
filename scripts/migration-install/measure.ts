@@ -11,7 +11,11 @@ import { snapshotCatalog } from '../../runtime/install-catalog.js';
 import { consumerInput } from '../../tests/migration-session/consumer-input.js';
 import type { CatalogEntry, GuestCatalog } from '../../types/index.js';
 import { sha256 } from '../package/stage-package.js';
-import { installSourceInventory } from './stage.js';
+import {
+  INSTALL_REGRESSION_UNITS,
+  type InstallCandidateOptions,
+  installCandidateInventory,
+} from './stage.js';
 
 export interface InstallTrial {
   tool: string;
@@ -145,12 +149,20 @@ export function installBrowserLaunch(
   };
 }
 
-export async function measureInstall(out: string, root = process.cwd()) {
+export async function measureInstall(
+  out: string,
+  root = process.cwd(),
+  options: InstallCandidateOptions = {},
+) {
   const input = await consumerInput();
-  if (input.candidate.unit !== 'u3-install')
+  if (!INSTALL_REGRESSION_UNITS.includes(input.candidate.unit))
     throw Error('U3 formal measurement requires current U3 candidate');
   const checkSource = async () => {
-    const source = await installSourceInventory(root);
+    const source = await installCandidateInventory(
+      input.candidate.unit,
+      root,
+      options,
+    );
     if (
       JSON.stringify(source) !== JSON.stringify(input.candidate.sourceFiles) ||
       sha256(JSON.stringify(source)) !== input.candidate.sourceIdentity

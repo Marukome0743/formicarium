@@ -20,9 +20,9 @@ const { publicationCli } = (await import(__rewriteRelativeImportExtension(pathTo
 const { validatePublishWorkflow } = (await import(__rewriteRelativeImportExtension(pathToFileURL(resolve(process.cwd(), 'scripts/release/workflow.js')).href)));
 const { artifactBytes } = (await import(__rewriteRelativeImportExtension(pathToFileURL(resolve(process.cwd(), 'scripts/release/evidence.js')).href)));
 const text = await readFile('.github/workflows/publish.yml', 'utf8');
-test('current publication preparation keeps exact twenty-one JS and thirty-one pack file inventory', () => {
-    assert.equal(PUBLICATION_JS.length, 21);
-    assert.equal(PUBLICATION_FILES.length, 31);
+test('current publication preparation keeps exact twenty-three JS and thirty-three pack file inventory', () => {
+    assert.equal(PUBLICATION_JS.length, 23);
+    assert.equal(PUBLICATION_FILES.length, 33);
     assert.deepEqual(PUBLICATION_JS, FIRST_PARTY_JS);
     assert.deepEqual(PUBLICATION_FILES, PACKAGE_FILES);
 });

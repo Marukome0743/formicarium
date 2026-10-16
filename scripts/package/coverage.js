@@ -286,7 +286,7 @@ async function readPlaywrightLaunchLedger(folder, generation, suite) {
 }
 /** The same fail-closed reader serves collection preflight and final merging. */
 export async function readPlaywrightNodeRealms(out, expectedSuites) {
-    const allowed = ['package', 'session', 'install'];
+    const allowed = ['package', 'session', 'install', 'command'];
     if (!expectedSuites.length ||
         new Set(expectedSuites).size !== expectedSuites.length ||
         expectedSuites.some((suite) => !allowed.includes(suite)))

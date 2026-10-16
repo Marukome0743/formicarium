@@ -470,9 +470,9 @@ test('actual instrumented statement hits avoid repeated statement property reads
         await rm(scratch, { recursive: true, force: true });
     }
 });
-test('coverage fixed21 inventory includes all unimported files at zero', () => {
+test('coverage fixed23 inventory includes all unimported files at zero', () => {
     const result = mergeRealms(metadata, layout, [register(createRealm(layout, 'host'))], ['host']);
-    assert.equal(result.map.files().length, 21);
+    assert.equal(result.map.files().length, 23);
     assert.ok(result.map.files().includes('runtime/guest-validation.js'));
     assert.ok(result.map.files().includes('runtime/session-port.js'));
     for (const name of [
@@ -481,6 +481,8 @@ test('coverage fixed21 inventory includes all unimported files at zero', () => {
         'install-transfer',
         'install-archive',
         'install-lifecycle',
+        'command',
+        'command-parse',
     ])
         assert.ok(result.map.files().includes(`runtime/${name}.js`));
     assert.equal(result.lines.pct, 0);
@@ -609,7 +611,7 @@ test('saturated statement counts merge with zero realms without changing covered
     const saturated = mergeRealms(metadata, layout, [realm, zero], ['host', 'unexecuted-worker']);
     file.s[key] = 1;
     const once = mergeRealms(metadata, layout, [realm, zero], ['host', 'unexecuted-worker']);
-    assert.equal(saturated.map.files().length, 21);
+    assert.equal(saturated.map.files().length, 23);
     assert.equal(saturated.map.fileCoverageFor(file.path).s[key], 2147483647);
     assert.deepEqual(saturated.lines, once.lines);
     assert.equal(saturated.lines.total, once.lines.total);
@@ -721,7 +723,7 @@ Atomics.wait(new Int32Array(workerData.control),0,0);
         assert.equal(Atomics.load(counters, index), 4096);
         const merged = mergeRealms(metadata, layout, [realm], ['worker']);
         assert.equal(merged.map.fileCoverageFor(file.path).s[key], 4096);
-        assert.equal(merged.map.files().length, 21);
+        assert.equal(merged.map.files().length, 23);
         assert.equal(merged.passed, false);
     }
     finally {

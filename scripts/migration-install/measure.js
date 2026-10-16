@@ -10,7 +10,7 @@ import { chromium, firefox, webkit } from '@playwright/test';
 import { snapshotCatalog } from '../../runtime/install-catalog.js';
 import { consumerInput } from '../../tests/migration-session/consumer-input.js';
 import { sha256 } from '../package/stage-package.js';
-import { installSourceInventory } from './stage.js';
+import { INSTALL_REGRESSION_UNITS, installCandidateInventory, } from './stage.js';
 export function summarizeInstallTrials(trials) {
     const groups = [];
     const nonDownload = (trial) => trial.phasesMs.extract +
@@ -92,12 +92,12 @@ export function installBrowserLaunch(browserName, profile) {
         options: { firefoxUserPrefs, ignoreHTTPSErrors: false },
     };
 }
-export async function measureInstall(out, root = process.cwd()) {
+export async function measureInstall(out, root = process.cwd(), options = {}) {
     const input = await consumerInput();
-    if (input.candidate.unit !== 'u3-install')
+    if (!INSTALL_REGRESSION_UNITS.includes(input.candidate.unit))
         throw Error('U3 formal measurement requires current U3 candidate');
     const checkSource = async () => {
-        const source = await installSourceInventory(root);
+        const source = await installCandidateInventory(input.candidate.unit, root, options);
         if (JSON.stringify(source) !== JSON.stringify(input.candidate.sourceFiles) ||
             sha256(JSON.stringify(source)) !== input.candidate.sourceIdentity)
             throw Error('formal U3 current source differs from candidate');

@@ -1,7 +1,7 @@
 # formicarium の開発ツール。emsdk は mise ではなく ~/AppData/Local/emsdk
 # （Windows 以外では ~/emsdk）を使う。scripts/emscripten-env.sh を参照。
 [tools]
-"github:awslabs/aidlc-workflows" = { version = "2.11.1-preview.20261015.1", matching_regex = "^aidlc-(darwin|linux|windows)-", bin = "aidlc", additional_asset_patterns = ["aidlc-runtime-{{ version }}.tar.gz"] }
+"github:awslabs/aidlc-workflows" = { version = "2.11.1-preview.20261016.1", matching_regex = "^aidlc-(darwin|linux|windows)-", bin = "aidlc", additional_asset_patterns = ["aidlc-runtime-{{ version }}.tar.gz"] }
 node = "26.12.0"
 bun = "1.4.3"
 rust = { version = "stable", targets = "x86_64-unknown-linux-musl" }
@@ -70,3 +70,15 @@ run = "node scripts/migration-install/completion.js"
 
 [tasks.migration-install-measure]
 run = "node scripts/migration-install/measure.js"
+
+[tasks.migration-command-unit]
+run = "node --test --test-concurrency=1 tests/migration-command/runner-ready.test.js tests/migration-command/parse.test.js tests/migration-command/dispatch.test.js tests/migration-command/public.test.js tests/migration-command/consumer.test.js tests/migration-command/acceptance.test.js"
+
+[tasks.migration-command-browser]
+run = "node node_modules/@playwright/test/cli.js test tests/migration-command/consumer.spec.ts --config tests/migration-command/playwright.config.ts --workers=1 --retries=0"
+
+[tasks.migration-command-stage]
+run = "node scripts/migration-command/stage.js"
+
+[tasks.migration-command-completion]
+run = "node scripts/migration-command/completion.js"

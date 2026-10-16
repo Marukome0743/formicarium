@@ -7,7 +7,7 @@
     { "id": "FR9", "status": "OK", "target": "scripts/migration-preflight/baseline.ts" },
     { "id": "NFR1.1", "status": "OK", "target": "scripts/migration-preflight/evidence.ts" },
     { "id": "NFR1.2", "status": "OK", "target": "tests/migration-preflight/consumer.spec.ts" },
-    { "id": "NFR2.1", "status": "OK", "target": "scripts/migration-preflight/current-completion.ts" },
+    { "id": "NFR2.1", "status": "OK", "target": "scripts/migration-preflight/current-coverage.ts" },
     { "id": "NFR3.1", "status": "OK", "target": "tests/migration-preflight/assets.test.ts" },
     { "id": "NFR3.2", "status": "GAP", "target": "scripts/migration-preflight/assets.ts" },
     { "id": "NFR4.1", "status": "GAP", "target": "scripts/migration-preflight/baseline.ts" },

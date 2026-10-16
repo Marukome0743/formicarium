@@ -15,6 +15,8 @@ export const FIRST_PARTY_JS = Object.freeze([
     'runtime/install-archive.js',
     'runtime/install-lifecycle.js',
     'runtime/install.js',
+    'runtime/command-parse.js',
+    'runtime/command.js',
     'runtime/state.js',
     'runtime/lifecycle.js',
     'runtime/protocol.js',

@@ -47,6 +47,13 @@
 5. U3/U4統合前のinstall-lifecycle/command-behavior全checkを成功としない。U4で同source/packの全C06 checkを再生成する。
 6. 公開操作は別途具体承認後。実装候補を公開済み又はB1最終受入済みと表示しない。
 
+### WF2.6 path解決（C02 resolvePath）
+
+1. U4のcommandなど同package内の呼出し側が、guest pathをC02 `resolvePath` へ渡す。
+2. 空でない文字列なら、相対pathを現在のcwdに付け、既存のpath正規化規則で正規化した絶対pathを返す。空・`..`・NUL・文字列でない値は同期で `INVALID_INPUT` を投げる（BR2.12）。
+3. 予約を取らず、cwd・FS・登録を変えない。dispose・reset・abortは検査しない。
+4. 呼出し側は、予約を保持している間か同じtickのうちに値を使い、解決後の絶対pathを既存の操作（listEntries、C02 builtin）へ渡す。それらの操作が従来どおり予約・BUSY・ABORTED・DISPOSEDを判定する。
+
 ## State Machine
 
 | 現状態 | 入力 | 次状態/結果 | 不変条件 |
@@ -74,12 +81,13 @@ validateGuestとfixtureToFsEntriesはSessionを持たない純粋API。UNSUPPORT
 | BR2.4–7 | 一予約・原子的登録・epoch取消・cleanup |
 | BR2.8 | 既存run/Worker/結果互換 |
 | BR2.10/11 | U2候補とU4最終B1の分離・公開前承認 |
+| BR2.12 | C02のpath解決（cwdの読取りだけ） |
 
 ## Acceptance and Corners
 
 FR2：digest/metadata/ELF bounds/PT_INTERP/違うtarget/patch/dependency/buildKey、偽造handleと他package brand、元byte/metadata変更、空fixture/奇異path/正規化重複/link loop/hardlink identity、各上限−1/上限/+1をNode/3browserで検証。canonical unknown付加fieldもidentityへ含める。raw JSON duplicateは入力をobject化する境界の責任で、復元できない情報を検証済みと呼ばない。
 
-FR5：直接run/FS/registerとC02 installの交差、二重acquireなし、旧release、reset/dispose/abort直後のlate commit、cleanup後即再実行、成功再登録/失敗旧登録保持を検証。session間でFS/cwd/登録は独立。無期限の操作queueや別状態ownerを作らない。
+FR5：直接run/FS/registerとC02 installの交差、二重acquireなし、旧release、reset/dispose/abort直後のlate commit、cleanup後即再実行、成功再登録/失敗旧登録保持を検証。session間でFS/cwd/登録は独立。無期限の操作queueや別状態ownerを作らない。resolvePathは相対・`.`・絶対pathの解決、cd・reset後の解決、空・`..`・NUL・文字列でない値の拒否、状態不変、予約を取らないことを検証する。
 
 FR6：公開基点照合、追加types/exports、source/pack/inventory一致、consumer全環境、配布asset同一性を検証。U2暫定とU4統合後のC06を区別する。実機Safariは未検証のまま。HTTP・archive取得・進捗UIはU3、shell/parser/transcriptはU4、toolbuild/verdictはU5/U6、tenant/auth/金額/個人情報保持は対象外。
 

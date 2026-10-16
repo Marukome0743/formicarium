@@ -1,14 +1,26 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
+import { INSTALL_REALMS } from '../../scripts/migration-install/coverage.js';
 import {
   acquireCurrentLock,
   assertActualSite,
   assertCurrentCoverage,
   assertCurrentIdentity,
+  assertCurrentToolchainEvidence,
   assertPassingTestOutput,
   assertSeals,
+  CURRENT_PENDING,
   type CurrentCompletionInput,
   currentCompletionCommands,
   executeCurrentSequence,
@@ -17,7 +29,135 @@ import {
   verifyCurrentCompletion,
   writeCurrentPreparedInput,
 } from '../../scripts/migration-preflight/current-completion.js';
-import { FIRST_PARTY_JS, sha256 } from '../../scripts/package/stage-package.js';
+import { verifyCurrentRawCoverage } from '../../scripts/migration-preflight/current-coverage.js';
+import {
+  instrumentPackage,
+  reportCoverage,
+} from '../../scripts/package/coverage.js';
+import {
+  FIRST_PARTY_JS,
+  PACKAGE_FILES,
+  sha256,
+} from '../../scripts/package/stage-package.js';
+
+/** Synthetic maps test reconciliation only; no retained product/CI result is imported. */
+async function withPlaywrightRawFixture(
+  run: (
+    out: string,
+    candidate: { files: { path: string; sha256: string }[] },
+  ) => Promise<void>,
+) {
+  await scratch(async (root) => {
+    const source = resolve(root, 'source'),
+      out = resolve(root, 'coverage');
+    const files: { path: string; sha256: string }[] = [];
+    for (const path of PACKAGE_FILES) {
+      const bytes = FIRST_PARTY_JS.includes(path)
+        ? 'export const imported = 1;'
+        : path === 'package.json'
+          ? '{"type":"module"}'
+          : '';
+      const target = resolve(source, path);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, bytes);
+      files.push({ path, sha256: sha256(bytes) });
+    }
+    const { layout } = await instrumentPackage({ source, out });
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    for (const suite of ['package', 'session', 'install']) {
+      const entry = resolve(out, `entry-${suite}.mjs`);
+      await writeFile(
+        entry,
+        `import './coverage-playwright-node-${suite}.mjs';\n` +
+          FIRST_PARTY_JS.map((path) => `import './${path}';`).join('\n'),
+      );
+      const child = spawn(process.execPath, [entry], {
+        env,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (text) => {
+        stderr += text;
+      });
+      const [code, signal] = await once(child, 'close');
+      assert.equal(signal, null, stderr);
+      assert.equal(code, 0, stderr);
+    }
+    const last = layout.at(-1)!;
+    const size = last.offset + last.keys.length;
+    // Planned host/Worker/browser fixtures deliberately have no statement hits.
+    // Only the real generated Node child imports above make line coverage pass.
+    const row = (name: string) => ({
+      name,
+      counts: [1, ...Array<number>(size - 1).fill(0)],
+    });
+    const inventory = JSON.parse(
+      await readFile(
+        resolve('scripts/package/coverage-inventory.json'),
+        'utf8',
+      ),
+    );
+    await writeFile(
+      resolve(out, 'coverage-node.json'),
+      JSON.stringify([
+        row('node-host'),
+        ...Array.from({ length: inventory.node.workers }, (_, index) =>
+          row(`node-worker-${index + 1}`),
+        ),
+      ]),
+    );
+    await writeFile(
+      resolve(out, 'coverage-session-node.json'),
+      JSON.stringify([
+        row('node-host'),
+        ...Array.from({ length: INSTALL_REALMS.nodeWorkers }, (_, index) =>
+          row(`node-worker-${index + 1}`),
+        ),
+      ]),
+    );
+    const cases: Record<string, number> = {
+      ...inventory.browserCases,
+      ...INSTALL_REALMS.browserCases,
+    };
+    let index = 0;
+    for (const project of ['chromium', 'firefox', 'webkit'])
+      for (const [title, workers] of Object.entries(cases)) {
+        const folder = resolve(out, 'browser-results', `fixture-${index++}`);
+        await mkdir(folder, { recursive: true });
+        await writeFile(
+          resolve(folder, 'coverage-realms.json'),
+          JSON.stringify({
+            project,
+            title,
+            rows: [
+              row('browser-host'),
+              ...Array.from({ length: workers }, (_, worker) =>
+                row(`browser-worker-${worker + 1}`),
+              ),
+            ],
+          }),
+        );
+      }
+    const candidate = { files, tarball: { sha256: digest } };
+    const candidatePath = resolve(root, 'candidate.json');
+    await writeFile(candidatePath, JSON.stringify(candidate));
+    const report = await reportCoverage({
+      out,
+      browserResults: resolve(out, 'browser-results'),
+      candidatePath,
+      session: INSTALL_REALMS,
+      runnerSuites: ['package', 'session', 'install'],
+    });
+    assert.equal(report.lines.pct, 100);
+    assert.equal(
+      report.realmNames.filter((name) => name.startsWith('playwright:')).length,
+      3,
+    );
+    await run(out, candidate);
+  });
+}
 
 const digest = 'a'.repeat(64);
 function fixture(): CurrentCompletionInput {
@@ -38,15 +178,13 @@ function fixture(): CurrentCompletionInput {
       files: [{ path: '/fixture/site/manifest.json', sha256: digest }],
       sha256: digest,
     },
-    historicalVerification: {
-      path: '/fixture/historical.json',
-      sha256: digest,
-    },
-    historicalFiles: [{ path: '/fixture/historical.json', sha256: digest }],
-    retained: {
-      verifier: { path: '/fixture/verifier.mjs', sha256: digest },
-      binding: { path: '/fixture/binding.json', sha256: digest },
-      reportSha256: digest,
+    preflight: {
+      trialsDirectory: '/fixture/attempt/trials',
+      browserLog: { path: '/fixture/attempt.log', sha256: digest },
+      inventory: { path: '/fixture/mirror-input.json', sha256: digest },
+      baselineDirectory: '/fixture/baseline',
+      ciRun: { path: '/fixture/ci-run.json', sha256: digest },
+      files: [{ path: '/fixture/attempt.log', sha256: digest }],
     },
   };
 }
@@ -97,7 +235,9 @@ test('current command scope retains public API, U1, U2, real installed/Worker co
     'coverage-session-node-preload.mjs',
   ])
     assert.ok(text.includes(required), required);
-  assert.equal(commands[0]!.args.at(-1), '--retained-evidence');
+  assert.ok(!text.includes('--retained-evidence'));
+  for (const command of commands.filter((row) => row.executable !== 'mise'))
+    assert.equal(command.executable, process.execPath);
   assert.ok(!text.includes('measure.js'));
   for (const command of commands.filter(
     (row) => row.args.includes('test') && row.executable !== 'mise',
@@ -145,7 +285,8 @@ test('real distribution sealing includes nested files and detects altered bytes,
   }));
 test('all current distributed JS including new install paths stay in the coverage denominator', () => {
   const report = coverage();
-  assert.equal(report.files.length, 21);
+  assert.equal(report.files.length, 23);
+  assert.ok(report.files.some((row) => row.path === 'runtime/command.js'));
   assert.doesNotThrow(() => assertCurrentCoverage(report, fixture()));
   report.files = report.files.filter((row) => !row.path.includes('install'));
   assert.throws(
@@ -191,6 +332,24 @@ test('raw immutable prerequisite must exist, remain unchanged and cannot have du
     await rm(path);
     await assert.rejects(assertSeals([row]), /ENOENT/);
   }));
+test('preflight acceptance evidence must come from the current Node, never an older toolchain', () => {
+  assert.doesNotThrow(() =>
+    assertCurrentToolchainEvidence({ environment: { node: process.version } }),
+  );
+  for (const node of ['v24.21.0', undefined, '', 'v26'])
+    assert.throws(
+      () => assertCurrentToolchainEvidence({ environment: { node } }),
+      /current Node/,
+    );
+  assert.throws(() => assertCurrentToolchainEvidence({}), /current Node/);
+});
+test('report pending lists only the work that is still open', () => {
+  assert.ok(CURRENT_PENDING.length > 0);
+  assert.ok(CURRENT_PENDING.every((item) => !/\bU3\b/.test(item)));
+  assert.ok(
+    CURRENT_PENDING.includes('current same-source signed CI before merge'),
+  );
+});
 test('child failure prevents every later required command without automatic retry', async () => {
   const commands = currentCompletionCommands(
     '/fixture',
@@ -345,10 +504,11 @@ test('prepared input requires every parameter before reading candidate or source
     candidate: '/candidate',
     consumer: '/consumer',
     guest: '/guest',
-    historical: '/history',
-    binding: '/binding',
-    verifier: '/verifier',
-    reportSha256: digest,
+    trials: '/attempt',
+    browserLog: '/attempt.log',
+    inventory: '/mirror-input.json',
+    baseline: '/baseline',
+    ciRun: '/ci-run.json',
   };
   for (const key of Object.keys(options) as (keyof typeof options)[])
     await assert.rejects(
@@ -370,3 +530,90 @@ test('prepared input writing refuses collisions and destinations outside its pro
       /project-local/,
     );
   }));
+
+test('current raw reconciliation includes actual generated Playwright Node imports from all three suites', async () => {
+  await withPlaywrightRawFixture(async (out, candidate) => {
+    const report = await verifyCurrentRawCoverage(out, candidate);
+    assert.equal(report.passed, true);
+    assert.equal(
+      report.realmNames.filter((name) => name.startsWith('playwright:')).length,
+      3,
+    );
+  });
+});
+
+test('current raw reconciliation refuses one-sided receipts, generation drift, counter changes and realm-name changes', async () => {
+  await withPlaywrightRawFixture(async (out, candidate) => {
+    const directory = resolve(out, 'coverage-playwright-node/package');
+    const names = await readdir(directory);
+    const beginPath = resolve(
+      directory,
+      names.find((name) => name.endsWith('.begin.json'))!,
+    );
+    const endPath = resolve(
+      directory,
+      names.find((name) => name.endsWith('.end.json'))!,
+    );
+    const beginBytes = await readFile(beginPath),
+      endBytes = await readFile(endPath);
+    for (const [path, bytes] of [
+      [beginPath, beginBytes],
+      [endPath, endBytes],
+    ] as const) {
+      await rm(path);
+      try {
+        await assert.rejects(
+          verifyCurrentRawCoverage(out, candidate),
+          /Playwright/,
+        );
+      } finally {
+        await writeFile(path, bytes);
+      }
+    }
+    const end = JSON.parse(endBytes.toString('utf8'));
+    await writeFile(
+      endPath,
+      JSON.stringify({ ...end, id: 'different-generation' }),
+    );
+    try {
+      await assert.rejects(
+        verifyCurrentRawCoverage(out, candidate),
+        /Playwright/,
+      );
+    } finally {
+      await writeFile(endPath, endBytes);
+    }
+    const counts: number[] = [...end.counts];
+    const metadata = JSON.parse(
+      await readFile(resolve(out, 'coverage-metadata.json'), 'utf8'),
+    );
+    counts[metadata.layout[0].offset] = counts[metadata.layout[0].offset]! + 1;
+    await writeFile(endPath, JSON.stringify({ ...end, counts }));
+    try {
+      await assert.rejects(
+        verifyCurrentRawCoverage(out, candidate),
+        /raw current coverage differs from aggregate/,
+      );
+    } finally {
+      await writeFile(endPath, endBytes);
+    }
+    const reportPath = resolve(out, 'coverage-report.json'),
+      reportBytes = await readFile(reportPath);
+    const report = JSON.parse(reportBytes.toString('utf8'));
+    const index = report.realmNames.findIndex((name: string) =>
+      name.startsWith('playwright:'),
+    );
+    assert.ok(index >= 0);
+    report.realmNames[index] = 'playwright:package:forged';
+    await writeFile(reportPath, JSON.stringify(report));
+    try {
+      await assert.rejects(
+        verifyCurrentRawCoverage(out, candidate),
+        /raw current coverage differs from aggregate/,
+      );
+    } finally {
+      await writeFile(reportPath, reportBytes);
+    }
+    await verifyCurrentRawCoverage(out, candidate);
+  });
+});

@@ -5,6 +5,15 @@ import type { AssetInput } from '../../scripts/migration-preflight/assets.js';
 import { BROWSERS, TOOLS } from '../../scripts/migration-preflight/evidence.js';
 import type { Trial } from '../../scripts/migration-preflight/evidence.js';
 
+// The toolchain that produced each trial is part of the trial record.
+const PLAYWRIGHT_VERSION = (
+  JSON.parse(
+    await readFile(
+      resolve('node_modules/@playwright/test/package.json'),
+      'utf8',
+    ),
+  ) as { version: string }
+).version;
 const inputPath = process.env.FORMICARIUM_PREFLIGHT_INPUT;
 if (!inputPath)
   throw Error(
@@ -178,6 +187,8 @@ for (const tool of TOOLS)
             stdout: result.stdout,
             stderr: result.stderr,
             environment: {
+              node: process.version,
+              playwright: PLAYWRIGHT_VERSION,
               browserVersion: browser.version(),
               userAgent: result.userAgent,
               isolated: String(result.isolated),

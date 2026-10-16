@@ -92,8 +92,16 @@ rules:
     logic: IF source・pack・全JS/types/assets inventoryとNode/3browser consumer証拠が一致 THEN 候補と表示。実公開は具体版と対象の承認後のみ
     violation: private RCと公開0.2.1の同一視なし、未承認公開なし
     source: FR6/NFR2/NFR6/NFR8/C06
+  - id: BR2.12
+    statement: C02のresolvePathは現在のcwdを読むだけでguest pathを解決する
+    category: validation
+    applies_to: SessionState
+    trigger: C02 resolvePath
+    logic: IF 空でない文字列 THEN 相対pathは現在のcwdに付け、絶対pathはそのまま、既存のpath正規化規則で正規化して返す。予約を取らず、状態を変えない。戻り値は呼出し時点のcwdにもとづき、dispose・reset・abortは検査しない。呼出し側は予約を保持している間か、同じtickのうちに値を使う
+    violation: 空・`..`・NUL・文字列でない値は同期でINVALID_INPUT。状態・予約は不変
+    source: FR5/C02
 ```
 
 ## Rule Summary
 
-BR2.1–3/9がguest・fixture入力検証、BR2.4–8が排他・commit・取消・既存run互換、BR2.10–11が候補供給と後続B1受入を担当する。C11の取得・展開と取消yieldはU3/U5等の取得側責任でありU2の同期純粋検証へ非同期shapeを独断追加しない。
+BR2.1–3/9がguest・fixture入力検証、BR2.4–8が排他・commit・取消・既存run互換、BR2.10–11が候補供給と後続B1受入、BR2.12がC02のpath解決を担当する。C11の取得・展開と取消yieldはU3/U5等の取得側責任でありU2の同期純粋検証へ非同期shapeを独断追加しない。

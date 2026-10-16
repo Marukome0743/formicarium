@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { consumerInput } from '../migration-session/consumer-input.js';
 import { serveDirectory } from '../package/fixtures.js';
 const input = await consumerInput();
-expect(input.candidate.unit).toBe('u3-install');
+expect(['u3-install', 'u4-command']).toContain(input.candidate.unit);
 let server;
 test.beforeAll(async () => {
     server = await serveDirectory(input.packageRoot);

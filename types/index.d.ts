@@ -77,6 +77,75 @@ export declare function createInstaller(
   session: Session,
   catalog: GuestCatalog,
 ): Installer;
+/**
+ * Options for one {@link CommandSession.execute} call.
+ *
+ * - `signal`: checked before any reservation; an already aborted signal
+ *   rejects with `ABORTED` and changes nothing. The builtins `ls`, `cat`,
+ *   `cd` and `rm` complete synchronously inside U2 once started, so a signal
+ *   raised after they start does not interrupt or change their result.
+ *   `install` and guest runs forward the signal to the installer and to the
+ *   session run.
+ * - `onProgress`: forwarded unchanged from the installer. `totalBytes: null`
+ *   means unknown and is distinct from `0`.
+ * - `onOutput`: forwarded unchanged from the guest run.
+ *
+ * There is no timeout option: guest runs use the session run default
+ * (600000 ms) and install keeps its own 120 s fetch / 180 s total deadlines.
+ */
+export interface CommandOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: Progress) => void;
+  onOutput?: (chunk: OutputChunk) => void;
+}
+/**
+ * Result of one command. `stdout`/`stderr` are new caller-owned original
+ * bytes on every call; they are never truncated, decoded or evaluated as
+ * HTML/code. Decoding for display, the display limits (1048576 bytes /
+ * 10000 lines), control-character handling, loading/empty/error states,
+ * keyboard operation, progress unknown-vs-zero and timestamp offsets belong to
+ * the embedding UI (U6/U8), not to this API.
+ */
+export interface CommandResult {
+  kind: 'empty' | 'builtin' | 'install' | 'guest';
+  exitCode: number;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+  /** Present only for `kind: 'guest'`. */
+  runId?: string;
+  /** Present only for `kind: 'install'`; identifies it by `operationId`. */
+  installation?: InstallResult;
+}
+/**
+ * One line interpreter over a Session. Syntax: ASCII space/tab separate
+ * arguments; single quotes are literal; inside double quotes only `\"` and
+ * `\\` are escapes; outside quotes `\x` is `x`. Unquoted `|`, `&`, `;`,
+ * `<`, `>`, `$`, backtick, `*`, `?`, `(`, `)`, `{` and `}`, unterminated
+ * quotes, a trailing backslash, LF/CR/NUL, lone surrogates and inputs over
+ * 65536 UTF-8 bytes reject with `INVALID_INPUT` before any reservation.
+ * Nothing is expanded. An input of only spaces/tabs (or empty) resolves as
+ * `kind: 'empty'` with exit code 0 and takes no reservation.
+ *
+ * Routing is by exact `argv[0]`: `ls [path]`, `cat path`, `cd path` and
+ * `rm -rf path` are builtins, `install <selection>` installs through the
+ * catalog, and any other name runs the registered guest of that name
+ * (`NOT_FOUND` when absent; a nonzero guest exit still resolves).
+ * `ls`, `cat`, `rm`, `cd` and `install` are reserved: a guest registered under
+ * one of these names (for example by `install ls@x`) cannot be run from a
+ * command, and the builtin keeps running. Paths are guest paths resolved by the
+ * Session: a relative path resolves against its current cwd, and an empty
+ * path or one containing `..` or NUL is `INVALID_INPUT`. Each call takes the Session's single reservation once, so it
+ * competes with direct Session/installer calls and other command sessions on
+ * the same Session with `BUSY`; after dispose it rejects with `DISPOSED`.
+ */
+export interface CommandSession {
+  execute(input: string, options?: CommandOptions): Promise<CommandResult>;
+}
+/** Builds a command session; a forged Session or invalid catalog is `INVALID_INPUT`. */
+export declare function createCommandSession(
+  session: Session,
+  options: { catalog: GuestCatalog },
+): CommandSession;
 export declare function validateGuest(
   bytes: Uint8Array,
   expected: GuestExpectation,

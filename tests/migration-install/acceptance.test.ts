@@ -34,8 +34,10 @@ import {
 } from '../../scripts/migration-install/ci-inputs.js';
 import {
   assertInstallTestOutput,
+  checkInstallCandidate,
   executeInstallCommand,
   installCompletionCommands,
+  installReportScope,
   isInstallTestCommand,
   verifyInstallCommandLog,
 } from '../../scripts/migration-install/completion.js';
@@ -50,6 +52,11 @@ import {
   resolveInstallFirefoxProfile,
   summarizeInstallTrials,
 } from '../../scripts/migration-install/measure.js';
+import {
+  INSTALL_REGRESSION_UNITS,
+  installCandidateInventory,
+  installSourceInventory,
+} from '../../scripts/migration-install/stage.js';
 import {
   CI_INPUT_PATHS,
   validateCIInputManifest,
@@ -876,4 +883,94 @@ test('U3 actual site inspection refuses missing/extra files, empty extra directo
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+test('U3 acceptance entries import no U4 module, so the dependency stays U4 to U3', async () => {
+  for (const name of ['stage', 'completion', 'coverage', 'measure'])
+    for (const extension of ['ts', 'js']) {
+      const text = await readFile(
+        new URL(
+          `../../scripts/migration-install/${name}.${extension}`,
+          import.meta.url,
+        ),
+        'utf8',
+      );
+      assert.equal(
+        /migration-command\//.test(text),
+        false,
+        `${name}.${extension} imports a U4 module`,
+      );
+    }
+});
+test('U3 binds U3 candidates to its own inventory and needs a caller inventory for U4 candidates', async () => {
+  assert.deepEqual(INSTALL_REGRESSION_UNITS, ['u3-install', 'u4-command']);
+  const root = resolve('.');
+  const own = await installSourceInventory(root);
+  assert.deepEqual(await installCandidateInventory('u3-install', root), own);
+  // A supplied U4 inventory cannot redirect a U3 candidate.
+  assert.deepEqual(
+    await installCandidateInventory('u3-install', root, {
+      commandSourceInventory: async () => [],
+    }),
+    own,
+  );
+  await assert.rejects(
+    installCandidateInventory('u4-command', root),
+    /no source inventory/,
+  );
+  const supplied = [{ path: 'x', sha256: 'a'.repeat(64) }];
+  assert.deepEqual(
+    await installCandidateInventory('u4-command', root, {
+      commandSourceInventory: async (at) => {
+        assert.equal(at, root);
+        return supplied;
+      },
+    }),
+    supplied,
+  );
+  for (const unit of ['u2-session-guest-api', 'u5-toolbuild', undefined, 7])
+    await assert.rejects(
+      installCandidateInventory(unit, root, {
+        commandSourceInventory: async () => supplied,
+      }),
+      /no source inventory/,
+    );
+});
+test('U3 candidate check refuses a U4 candidate without a caller inventory and other units first', async () => {
+  const scratch = await mkdtemp(resolve('.artifacts', 'u3-candidate-unit-'));
+  try {
+    const write = async (unit: string) => {
+      const path = resolve(scratch, `${unit}.json`);
+      await writeFile(
+        path,
+        JSON.stringify({
+          unit,
+          version: '0.3.0',
+          provisional: true,
+          sourceCommit: 'a'.repeat(40),
+        }),
+      );
+      return path;
+    };
+    await assert.rejects(
+      checkInstallCandidate(await write('u4-command'), resolve('.')),
+      /no source inventory/,
+    );
+    await assert.rejects(
+      checkInstallCandidate(await write('u2-session-guest-api'), resolve('.')),
+      /current U3 candidate identity missing/,
+    );
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+test('U3 report names the candidate unit and its later acceptance', () => {
+  assert.deepEqual(installReportScope('u3-install'), {
+    unit: 'u3-install',
+    laterUnits: 'U4 command/B1未受入',
+  });
+  assert.deepEqual(installReportScope('u4-command'), {
+    unit: 'u4-command',
+    laterUnits: 'U4 B1未受入（U4候補でのU3回帰）',
+  });
+  assert.throws(() => installReportScope('u2-session-guest-api'), /unit/);
 });

@@ -2,6 +2,7 @@
 > This file is kept up to date automatically while the stage runs. Add observations at the review step, not by editing here directly.
 
 ## Interpretations
+- 2026-10-16T20:31:04Z [unit u4-command] — library種別なのでsecurity-requirementsに品質条件を集約した。機能設計レビューで後工程扱いとしたMinorのうち、取消（事前abortはABORTED、同期builtinは中断しない）、timeout（Session.runの既定値）、予約名を、NFR4.1/4.2/7.2として要件化した。technology-stack.mdの版は古いため、toolchain更新後の値（Node 26.12.0、Bun 1.4.3、Playwright 1.64.1）を記した。
 - 2026-10-13T19:38:06Z [unit u3-install] — library種別でも性能・信頼性・通知の条件をsecurity-requirementsへ保持した。Nodeのoriginなし相対URLは暗黙補完せず拒否し、公開shape変更なしで環境差を明示する。
 2026-10-12T23:18:28Z — [unit u2-session-guest-api] libraryの適用文書にNFR2/3/4/6/8を集約。同期検証と非同期取得境界、U2暫定証拠とU4完全B1証拠を区別し、新しいSLOや認証サービスを導入しない。
 <!-- example: 2026-05-29T10:14:32Z — chose REST over GraphQL; the consuming team only needs CRUD, revisit if subscriptions land -->
@@ -13,4 +14,5 @@
 <!-- example: 2026-05-29T10:14:32Z — picked TDD over BDD this run; the team is unit-first and the domain is well-understood -->
 
 ## Open questions
+- 2026-10-16T20:33:00Z [unit u4-command] — レビューREADY（Minor 3件）。設計段階と同じ扱いで凍結のままとし、U4 Code Generation計画へ反映する：(1) NFR7のうちU6/U8の責任となるUI条件（loading/empty/error、keyboard、進捗unknownと0、時刻offset）の受渡しを明記する。(2) 入力の孤立surrogateはUTF-8へ変換できないためINVALID_INPUTとし、byte数はTextEncoder後の長さで数える。(3) 同梱browserのbuild番号は固定記録にせず、Playwrightの版と実行時に観測した値で記録する。
 <!-- example: 2026-05-29T10:14:32Z — confirm the retention window with compliance before the next stage hardens the schema -->

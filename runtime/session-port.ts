@@ -31,6 +31,16 @@ export interface SessionPort {
     argv: readonly string[],
   ): Promise<BuiltinResult>;
   release(reservation: Reservation): Promise<void>;
+  /**
+   * Synchronously resolves a guest path against the current cwd with the
+   * normalizePath rules (absolute stays absolute; empty, NUL and `..` are
+   * INVALID_INPUT). It reads the cwd only and never changes session state.
+   * The result is a snapshot of the cwd at call time. Unlike the other
+   * methods it takes no reservation, does not check dispose, reset or abort,
+   * and throws INVALID_INPUT synchronously instead of rejecting. Callers use
+   * the value while they hold a reservation or within the same tick (BR2.12).
+   */
+  resolvePath(path: string): string;
 }
 const ports = new WeakMap<Session, SessionPort>();
 export function bindSessionPort(session: Session, port: SessionPort): void {

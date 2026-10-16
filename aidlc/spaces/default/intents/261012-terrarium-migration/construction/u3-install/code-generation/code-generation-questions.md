@@ -7,16 +7,16 @@ instead of in chat, write your answer after `[Answer]:` and tell me in chat when
 
 Approve the code plan for u3-install?
 
-- Builds: 実配信入力・必須試験の受入入口と、単一writerを確認したrealmのcoverage読出し負荷の修正。
-- Touches: U3 CI入力・実行・受入入口と記録、共有scripts/package/coverage.tsのbridgeSource、対応coverage試験。
-- Tests: 固定入力・skip拒否に加えcounterの値と可視性を維持し、計測付きNode115件、新候補の回帰・全21JS coverage80%以上・正式36試行・署名付き同一候補CIを確認する。
-- Already changed before you approved (2203 files): .artifacts/migration-install/actual-site/tools.json, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package.manifest.json, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/LICENSE, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/README.md, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/THIRD_PARTY_NOTICES.md, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/aletheia-works-formicarium-0.3.0.tgz, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/assets/blink.mjs, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/assets/blink.wasm, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/assets/build-info.json, .artifacts/migration-install/candidate-536a358f-541e-47f7-a288-f944f653c204/package/package.json (and 2193 more).
+- Builds: 3回目の再開（追加Step 16–19）。review-05のR-10（U3の受入入口がU4の `stage.ts` をimportし、moduleが循環して依存が逆向き）とR-11（reportのunitが固定）を、修正案の案Aで直す。受入の規則はU3側に置き、U4の候補のsource一覧は呼出し側から受け取る。
+- Touches: `scripts/migration-install/stage.ts`・`completion.ts`・`coverage.ts`・`measure.ts` と生成JS、`tests/migration-install/acceptance.test.ts` と生成JS、U3の記録。U4のfileは変えない（U4側の呼出しの変更はU4の計画で行う）。
+- Tests: 先に再現試験を書いてfailを観測し、直してからpassを確かめる（acceptance・lifecycle、fail・skip 0）。独立レビューと、intentの検証コマンドによるcheckpointの確認を行う。最終的なsourceでのU3の正式36試行・専用CIは、U4の後にまとめて行う。
+- 前回（toolchain更新）の要約：開発toolchainを最新版（Node.js 26.12.0、Bun 1.4.3、Playwright 1.64.1＝Firefox 157.0）へ全リポジトリで一貫更新し、CI正式36試行のBiome/Firefox中央値3000ms超過を新toolchainで再判定した。触ったのはmise.toml、package.json/bun.lock、sc...
 
 Full plan: aidlc/spaces/default/intents/261012-terrarium-migration/construction/u3-install/code-generation/code-generation-plan.md
 Test instructions: aidlc/spaces/default/intents/261012-terrarium-migration/construction/u3-install/code-generation/unit-test-instructions.md
 
-[Approval Fingerprint]: sha256:v3:7824e76aac62a2de729668b8d14e9dcfc21c333e3573ed74771592f0e74a71fe
-[Planned Source]: db4f51c8cf245006b6ae096d886d9695a9b396c21d44086e8b3209b5096308aa
+[Approval Fingerprint]: sha256:v3:9d3fbbf52d803f51447291d2a3a66f491a38e1bef2e9b4315788b507cd74915e
+[Planned Source]: a4f28691893a4228fb8c7ee49c167be0d5e349061e33c18cdaa92727aaa1af21
 
 - A. Approve Plan
 - B. Request Changes

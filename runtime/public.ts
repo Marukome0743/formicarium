@@ -7,6 +7,7 @@ import { sessionPort } from './session-port.js';
 
 export { fixtureToFsEntries, validateGuest } from './guest-validation.js';
 export { createInstaller } from './install.js';
+export { createCommandSession } from './command.js';
 
 /** The package-local session brand is checked before handing private bytes to run. */
 export function runValidatedGuest(

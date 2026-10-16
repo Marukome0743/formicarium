@@ -31,6 +31,9 @@ function lifetime(ownerCode = 'ABORTED', caller, clock) {
         async release() {
             throw Error('unexpected release');
         },
+        resolvePath() {
+            throw Error('unexpected resolve');
+        },
     };
     const control = new InstallLifetime(reservation, port, caller, clock);
     return { control, owner, queries: () => queries };

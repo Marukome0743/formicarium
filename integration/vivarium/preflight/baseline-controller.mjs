@@ -12,6 +12,92 @@ import {
 } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
+// scripts/migration-preflight/unique-json.js
+function parseUniqueJSON(raw) {
+  let cursor = 0;
+  const space = () => {
+    while (/\s/.test(raw[cursor] ?? "") && cursor < raw.length)
+      cursor++;
+  };
+  const string = () => {
+    const start = cursor++;
+    while (cursor < raw.length) {
+      const character = raw[cursor++];
+      if (character === "\\")
+        cursor++;
+      else if (character === '"')
+        return JSON.parse(raw.slice(start, cursor));
+    }
+    throw Error("unterminated JSON string");
+  };
+  const value = () => {
+    space();
+    if (raw[cursor] === "{") {
+      cursor++;
+      space();
+      const keys = new Set;
+      if (raw[cursor] === "}") {
+        cursor++;
+        return;
+      }
+      while (true) {
+        space();
+        if (raw[cursor] !== '"')
+          throw Error("JSON object key required");
+        const key = string();
+        if (keys.has(key))
+          throw Error(`duplicate JSON key: ${key}`);
+        keys.add(key);
+        space();
+        if (raw[cursor++] !== ":")
+          throw Error("JSON colon required");
+        value();
+        space();
+        const delimiter = raw[cursor++];
+        if (delimiter === "}")
+          return;
+        if (delimiter !== ",")
+          throw Error("JSON object delimiter required");
+      }
+    }
+    if (raw[cursor] === "[") {
+      cursor++;
+      space();
+      if (raw[cursor] === "]") {
+        cursor++;
+        return;
+      }
+      while (true) {
+        value();
+        space();
+        const delimiter = raw[cursor++];
+        if (delimiter === "]")
+          return;
+        if (delimiter !== ",")
+          throw Error("JSON array delimiter required");
+      }
+    }
+    if (raw[cursor] === '"') {
+      string();
+      return;
+    }
+    const start = cursor;
+    while (cursor < raw.length && !/[\s,\]}]/.test(raw[cursor]))
+      cursor++;
+    if (cursor === start)
+      throw Error("JSON value required");
+    JSON.parse(raw.slice(start, cursor));
+  };
+  value();
+  space();
+  if (cursor !== raw.length)
+    throw Error("trailing JSON input");
+  return JSON.parse(raw);
+}
+
+// scripts/migration-preflight/baseline.ts
+var BUILD_INFO_LIMIT = 1024 * 1024;
 var BASELINE_COMMIT = "2405c7620169bd0719166af09a8d89cc76fb37fb";
 var BASELINE_REPOSITORY = "https://github.com/biomejs/biome";
 var MAKE_PACKAGE = Object.freeze({
@@ -182,7 +268,9 @@ async function readAccepted(directory, inputs) {
   const elf = new Uint8Array(await readFile(resolve(directory, "biome")));
   validateBaselineElf(elf);
   const raw = await readFile(resolve(directory, "build-info.json"));
-  const info = JSON.parse(raw.toString("utf8"));
+  if (raw.byteLength > BUILD_INFO_LIMIT)
+    throw Error("accepted baseline metadata exceeds 1 MiB");
+  const info = parseUniqueJSON(raw.toString("utf8"));
   const key = baselineKey(inputs);
   if (info.schemaVersion !== 1 || info.tool !== inputs.tool || info.versionOrName !== inputs.versionOrName || info.source.repository !== inputs.repository || info.source.commit !== inputs.commit || info.target !== inputs.target || info.rustc !== inputs.rustc || info.builderHash !== inputs.builderHash || info.buildKey !== key || info.elfSha256 !== hash(elf) || info.versionExitCode !== 0 || canonical(info.inputs) !== canonical(inputs) || canonical(info.sourcePatches) !== canonical(inputs.sourcePatches) || canonical(info.dependencies) !== canonical(inputs.dependencies))
     throw Error("accepted baseline identity/digest mismatch");

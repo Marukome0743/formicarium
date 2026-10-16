@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sha256 } from '../../scripts/package/stage-package.js';
 import { consumerInput } from '../migration-session/consumer-input.js';
 const input = await consumerInput();
-assert.equal(input.candidate.unit, 'u3-install');
+assert.ok(['u3-install', 'u4-command'].includes(input.candidate.unit));
 for (const name of [
     'install',
     'install-catalog',

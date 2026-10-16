@@ -380,7 +380,7 @@ export async function readPlaywrightNodeRealms(
   out: string,
   expectedSuites: string[],
 ) {
-  const allowed = ['package', 'session', 'install'];
+  const allowed = ['package', 'session', 'install', 'command'];
   if (
     !expectedSuites.length ||
     new Set(expectedSuites).size !== expectedSuites.length ||

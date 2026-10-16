@@ -19,7 +19,7 @@ entities:
       - {name: initialState, type: OwnedInitialFilesystemAndCwd, required: true}
       - {name: installedGuests, type: ToolToValidatedGuestMap, required: true}
       - {name: activeOperation, type: ReservationOrNull, required: true}
-    constraints: [登録とFS/cwdの副本を他部品へ持たせない, disposedは終端, resetは初期FS/cwdを復元する]
+    constraints: [登録とFS/cwdの副本を他部品へ持たせない, disposedは終端, resetは初期FS/cwdを復元する, cwdはC02 resolvePathで読むだけで変更しない]
     relationships:
       - {target: Reservation, cardinality: zero-or-one, direction: owns}
       - {target: ValidatedGuest, cardinality: zero-or-many, direction: references-private-owned-value}

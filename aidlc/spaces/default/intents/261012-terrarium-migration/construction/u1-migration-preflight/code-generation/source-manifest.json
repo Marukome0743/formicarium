@@ -13,6 +13,9 @@
       "path": ".github/publication/runner.mjs"
     },
     {
+      "path": ".gitignore"
+    },
+    {
       "path": "docs/results/terrarium-migration-preflight-evidence/acceptance-assembly.json"
     },
     {
@@ -202,7 +205,13 @@
       "path": "scripts/migration-preflight/current-completion.ts"
     },
     {
+      "path": "scripts/migration-preflight/current-coverage.js"
+    },
+    {
       "path": "scripts/migration-preflight/current-coverage.ts"
+    },
+    {
+      "path": "scripts/migration-preflight/current-evidence.ts"
     },
     {
       "path": "scripts/migration-preflight/evidence.ts"
@@ -212,6 +221,9 @@
     },
     {
       "path": "scripts/migration-preflight/runner.ts"
+    },
+    {
+      "path": "scripts/migration-preflight/unique-json.ts"
     },
     {
       "path": "scripts/migration-preflight/verify.ts"
@@ -250,7 +262,13 @@
       "path": "tests/migration-preflight/consumer.spec.ts"
     },
     {
+      "path": "tests/migration-preflight/current-completion.test.js"
+    },
+    {
       "path": "tests/migration-preflight/current-completion.test.ts"
+    },
+    {
+      "path": "tests/migration-preflight/current-evidence.test.ts"
     },
     {
       "path": "tests/migration-preflight/evidence.test.ts"

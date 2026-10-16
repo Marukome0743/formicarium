@@ -6,7 +6,11 @@ import {
   assertInstallNodeRealms,
   INSTALL_REALMS,
 } from '../migration-install/coverage.js';
-import { counterLayout, mergeRealms } from '../package/coverage.js';
+import {
+  counterLayout,
+  mergeRealms,
+  readPlaywrightNodeRealms,
+} from '../package/coverage.js';
 import { sha256 } from '../package/stage-package.js';
 
 /** Read-only recomputation: no old aggregate or registered realm can replace raw counters. */
@@ -89,6 +93,13 @@ export async function verifyCurrentRawCoverage(
       (_, i) => `node-worker-${i + 1}`,
     ),
   ]);
+  const runnerRealms = await readPlaywrightNodeRealms(out, [
+    'package',
+    'session',
+    'install',
+  ]);
+  realms.push(...runnerRealms);
+  expected.push(...runnerRealms.map((realm) => realm.name));
   const files: string[] = [];
   const scan = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {

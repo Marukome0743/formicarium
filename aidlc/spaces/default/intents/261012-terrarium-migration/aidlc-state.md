@@ -25,7 +25,7 @@
 - **Sensors**: on (from scope classic)
 - **Learnings**: on (from scope classic)
 - **Summary Confirmation**: off (from scope classic)
-- **Plan Approval**: on (from scope classic)
+- **Plan Approval**: on (set by a command)
 - **Collaborators**: off (from scope classic)
 
 ## Workspace State
@@ -59,7 +59,88 @@
 
 
 
-- **Construction Verification Command**: /Users/mutoakio/.local/share/mise/installs/node/24.21.0/bin/node scripts/migration-preflight/current-completion.js verify .artifacts/migration-preflight/current-recovery-input-20261015-v5.json 54b5da8fa4052a6894eab0cc63ee02556252b253d17f6ab8404f1aa5f5afc3bd .artifacts/migration-preflight/current-completion-055093d2-bbde-4851-8566-663a68c1e8bd/current-local-verification-report.json 12d6bd4a509ebf374f052067959595d86f5e8c4c24035ef9bea4597e24275ff2
+- **Construction Verification Command**: /Users/mutoakio/.local/share/mise/installs/node/26.12.0/bin/node --test --test-concurrency=1 tests/migration-preflight/evidence.test.js tests/migration-preflight/assets.test.js tests/migration-preflight/runner.test.js tests/migration-preflight/prepare-mirror.test.js tests/migration-preflight/baseline.test.js tests/migration-preflight/verify.test.js tests/migration-preflight/completion.test.js tests/migration-preflight/current-completion.test.js tests/migration-preflight/current-evidence.test.js tests/terrarium/coverage.test.js
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -161,7 +242,7 @@ Per unit: [TBD]
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-10-15T14:28:13Z
+- **Last Updated**: 2026-10-17T10:37:04Z
 
 - **Construction Autonomy Mode**: autonomous
 

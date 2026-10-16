@@ -4,7 +4,7 @@ import { sha256 } from '../../scripts/package/stage-package.js';
 import { consumerInput } from '../migration-session/consumer-input.js';
 import { serveDirectory } from '../package/fixtures.js';
 const input = await consumerInput();
-expect(input.candidate.unit).toBe('u3-install');
+expect(['u3-install', 'u4-command']).toContain(input.candidate.unit);
 for (const name of [
     'install',
     'install-catalog',

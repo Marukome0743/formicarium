@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24.21.0'
+          node-version: '26.12.0'
       - name: Validate reviewed controller and allocate trial directories
         run: |
           node --input-type=module <<'NODE'
@@ -94,4 +94,4 @@ jobs:
             .artifacts/preflight/cache/*/biome
             .artifacts/preflight/cache/*/build-info.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7

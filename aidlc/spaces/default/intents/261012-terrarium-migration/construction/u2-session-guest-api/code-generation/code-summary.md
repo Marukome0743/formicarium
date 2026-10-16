@@ -1,18 +1,72 @@
-# U2 code summary（2026-10-15 再開）
+# U2 code summary（2026-10-16 再開）
+
+## 4回目の再開：review-08の指摘の修正（2026-10-17、Step 18）
+
+人間が承認した修正案 `u2-resolvepath-contract-proposal.md`（案A）に従い、review-08のR-08〜R-10を直した。
+- R-08：functional-designを開き直し、BR2.12（C02の `resolvePath`）とWF2.6を加え、`contract-summary.md` のC02に追記した。そのレビューはREADY。contract-design自体はやり直していない（エンジンはcontract-designを「drifted」と表示する。人間が選んだ扱い）。
+- R-09：`runtime/session-port.ts` の `resolvePath` のJSDocに、戻り値は呼出し時点のcwdであること、予約を取らずdispose・reset・abortを検査しないこと、同期で `INVALID_INPUT` を投げること、呼出し側は予約保持中か同じtickのうちに使うことを書いた。interfaceのコメントだけで、生成した `session-port.js` は変わらない（追記した文は `.js` に含まれない）。
+- R-10：`current-recovery-verification.md` の冒頭に、3回目の再開で製品コードが変わったことへの参照を加えた。
+- traceability.json：BR2.12を `runtime/lifecycle.ts`・`tests/migration-session/reservation.test.ts` に対応づけた。
+- mainの観測（Node v26.12.0）：`mise run build` exit 0。`node --test --test-concurrency=1 tests/migration-session/reservation.test.js` は12件pass、fail・skip 0。
+
+## 3回目の再開：U4の変更の引受け（2026-10-17、Step 16）
+
+U4の追加Step項目3・4で、U2がclaimするfileが変わった。人間の判断で、この変更をU2の変更として引き受けた。下のStep 14の「U2の製品コードは変わっていない」は、この変更より前の記述である。
+- 製品コード：`runtime/session-port.ts` の `SessionPort` に `resolvePath(path: string): string` を加えた。`runtime/lifecycle.ts`（生成した `lifecycle.js` にも反映済み）が実装する。相対pathは現在のcwdに付け、既存の `normalizePath` で正規化する。空・`..`・NUL・文字列でない値は `INVALID_INPUT`。cwdを読むだけで、session状態を変えず、予約も取らない。
+- 既存の振る舞いを変えないこと（fileを読んで確認）：`runtime/validation.ts`（`normalizePath`）は変わっていない。既存のSessionPortのmethodとC02/C03の振る舞いは変わっていない。`session-port.js` はpackageのfilesに入るが、exportsには出していない（U4のconsumer試験が `ERR_PACKAGE_PATH_NOT_EXPORTED` を確かめる）。
+- 試験：`tests/migration-session/reservation.test.ts` に2件を加えた（相対・`.`・絶対pathの解決とcd・resetの後の解決／不正な値の拒否、状態不変、予約を取らないこと）。`tests/package/public.test.ts` のroot exportの一覧に `createCommandSession` を加えた。`pack.test.ts`・`package/coverage.test.ts`・`terrarium/coverage.test.ts` の件数（23件・33件）と名前の一覧は、U1のStep 18と同じ変更である。どれも期待値を実際の一覧に合わせただけで、判定条件は緩めていない。
+- `tests/migration-install/lifecycle.test.ts` の模擬portへの `resolvePath` の追加はU3のfileなので、U3のやり直しで引き受ける。
+- source-manifest.json：上のfileはすべて既にclaimしている。追加はない。traceability.json：既存の行（BR2.5・NFR4.2→`reservation.test.ts`、BR2.7→`session-port.ts`）が今回の変更を覆う。行の追加はない。
+- mainの観測（2026-10-17、Node v26.12.0）：`mise run build` 成功。`node --test --test-concurrency=1 tests/migration-session/reservation.test.js` は12件pass（resolvePathの2件を含む）、`tests/package/public.test.js` は6件pass。どちらもfail・skip 0。
+- 最終的なsourceでのU1〜U4のまとめた確認はU4の後に行う。それまでは、v10を変更後のsourceの成功証拠として扱わない。
+
+## 2回目の再開：U4の作業を戻した後（2026-10-17、Step 14）
+
+U2のレビュー（review-06）の後に、U2がclaimする共有fileが変わった。理由は2つある。
+1. 一時的に外していたU4の作業を戻した。
+2. AI-DLCを2.11.1-preview.20261016.1に更新した（人間の承認済み）。
+
+mainが、7c7ceaf4との差分（`jj diff --stat`）を確かめた。
+- `runtime/public.ts`：1行追加（`createCommandSession` のexport）。
+- `types/index.d.ts`：68行追加（C05の型）。
+- `scripts/package/stage-package.ts`・`coverage-inventory.json`：各2行追加。配布JSに `runtime/command.js`・`runtime/command-parse.js` を加え、23件になった。
+- `README.md`：6行追加。
+- `package.json`：files、@types/node 26.6.5。
+- `mise.toml`：U4のtaskとAI-DLCのpin。
+
+`public.ts` と `index.d.ts` に、削除した行はない。既存のU2のAPI（C02の内部port、C03の `validateGuest`・`fixtureToFsEntries`・`runValidatedGuest`・`registerValidatedGuest`）の定義は変わっていない。U2の製品コード（`runtime/guest-validation.ts`・`session-port.ts`・`lifecycle.ts`・`state.ts` など）も変わっていない。
+
+intentの検証コマンドは、人間の承認により、U1の試験を今のsourceで実行するコマンドに置き換わった（mainの実行で101/101がpass）。下のv10の照合は、U4の作業を戻す前のsourceに結び付いている。U4を含む最終的なsourceでの確認（U2の単体・browser・consumer・coverageを含むU1〜U4のまとめた確認）と、新しい検証コマンドは、U4の作業がすべて終わった後に行う。それまでは、v10を変更後のsourceの成功証拠として扱わない。
+
+## 現在の結果：v10（2026-10-17、最新toolchain）
+
+方針（人間の指示、2026-10-17）：古い版のtoolで作った記録は履歴であり、今のtoolchainの根拠にしない。最新版（Node 26.12.0、Bun 1.4.3、Playwright 1.64.1）で実行した成否だけで確かめる。
+
+- 入力：`.artifacts/migration-preflight/current-recovery-input-20261017-v10.json`（SHA256 `56c78183f6b1af91f9e1de7a1179c6d9ba416ff2be584834d4f5931a050d6fb9`）。reportの `preparedInput.sha256` と一致することを読取りで確認した。
+- report：`.artifacts/migration-preflight/current-completion-7de2263f-2f39-4236-8895-82b7f32b55a8/current-local-verification-report.json`（SHA256 `e7760ddbe0e943d0830e8a7093c30a5898cfc86f8d49ed5d94f7e55dab197a01`）。この値は承認済み検証コマンドの引数と一致する。ファイル自体のSHA256はmainの検証コマンドが照合した（本記録では再計算していない）。
+- reportの読取り：`exitCode` 0、`signal` null、`currentSourceVerified` true、`preflightEvidenceNode` `v26.12.0`。20工程すべて `exitCode` 0。全体は `2026-10-17T02:15:47.174Z`〜`02:34:25.193Z`、工程1（build）の開始 `02:15:48.007Z`、工程20（coverage report）の終了 `02:33:57.987Z`。
+- U2の試験を含む工程：工程7 `mise run migration-session-unit`、工程9 `mise run migration-session-browser`、工程11 `mise run test-consumer`、工程15–16 計測Node（工程16はtests/migration-session/のguest-validation・fixture・reservation・public・consumerを含む）、工程17 計測packageブラウザ、工程18 計測U2ブラウザ（tests/migration-session）、工程20 coverage report。
+- coverage（同じdirectoryの `coverage/coverage-report.json`）：1768/1929行＝91.65%、skipped 0、threshold 80、passed true、配布JS 21件、realm 1495件。
+- 承認済みの検証コマンド：`aidlc/spaces/default/intents/261012-terrarium-migration/verification/verification-command-u1u2-v10.txt`（Node 26.12.0の `current-completion.js verify`、入力・reportと上記2つのSHA256を指定）。mainが実行し、`verified:true` を観測した（mainの観測であり、本記録での実行ではない）。
+- U2の製品コードは変えていない。コードの変更はU1のfileだけである。v8とv10のcoverage reportで、U2のruntime/guest-validation.js・session-port.js・state.js・lifecycle.js・public.jsを含む全21配布JSの `sourceSha256` が同じであることを読取りで確認した。
+- 境界：`acceptancePassed=false`、`mergeAllowed=false`、`laterUnitAcceptance=false`（mainがv10 reportのtop-level fieldを読み取って確認した）。現在sourceの署名付きCIとmergeは未受入れ（reportの `pending` に `current same-source signed CI before merge` がある）。実機Safariは未検証（reportの `realSafari` は `未検証`）。
+- 以下のv8・v4〜v7の記述は、古いtoolchain（Node 24.21.0）での履歴であり、今の判定には使わない。
 
 ## 今回の変更と現在の証拠
 
-検証済み（固定結果と原ログの読取り照合）：既存C02/C03実装を保持し、U2記録を現在の21JS/31pack候補へ対応づけた。今回の変更は本summary、traceability.json、current-recovery-verification.mdと計画の完了checkboxのみ。source-manifest.jsonの91個別パスは全て存在し、重複なしであるため主張を削除・追加せず保持した。アプリケーションコード、承認済み計画本文・試験指示、U1成果物、封印証拠は変更していない。
+検証済み（固定入力・結果・原ログの読取り照合）：既存C02/C03実装を保持し、U2記録を現在のv8証拠へ整合した。今回の変更は本summary、current-recovery-verification.mdと計画Step9/10の完了checkboxのみ。traceability.jsonの26対応とsource-manifest.jsonの91個別パスは全て存在し、一覧の重複なしのため内容を保持した。アプリケーションコード、承認済み計画本文・試験指示、U1成果物・完了承認、封印証拠は変更していない。
 
-固定v5入力SHA256は54b5da8fa4052a6894eab0cc63ee02556252b253d17f6ab8404f1aa5f5afc3bd、結果SHA256は12d6bd4a509ebf374f052067959595d86f5e8c4c24035ef9bea4597e24275ff2。既存の21逐次子コマンドは全てexit0、配布21JSは1768/1929行（91.65%）、1483 realms、skip0。U2 Node44件とChromium/Firefox/WebKit計9件、独立consumer195件、既存Node回帰28件・ブラウザ回帰33件が原ログに記録されている。今回これらのsuiteを再実行したとは主張しない。入力・source・pack・consumer・配信元とログの対応はcurrent-recovery-verification.mdに記録した。
+v8入力SHA256は25d44cb9c6def3cdc65317d76add2ecb90b5010fc05f4e097f982cdf98655bd0、結果SHA256はfe0d5a01fe5e193258f10371d9cd7c3a446b8b820f3005dabcaeca0300b63079。mainによる既存の全21工程（2026-10-16T10:18:42.073Z–10:42:13.335Z）は全てexit0。21JS/31pack、1768/1929行（91.65%）、1495 realms（Playwright Node12件を含む）、skip0。394 source・435 evidence・actualSite全rowsと独立consumer31ファイルのSHAは不一致0。U2 Node44、3ブラウザ9、計測付きU2/U3 Node115、既存consumer204・Node core28・ブラウザcore33の成功を原ログで照合した。本U2再開で全21工程を新規実行したとは主張しない。
 
-主担当報告ではv5に対する承認済み短時間verifyが成功し、U1 checkpointも通過している。正式U2 checkpointは本記録時点で未完了。currentSourceVerified=trueでもacceptancePassed=false、mergeAllowed=false、laterUnitAcceptance=falseを保持する。現在同一sourceの統合前署名付きCIは未検証、現在候補のU3正式36試行・専用CIは保留。共有SHA256改善は承認済みU3計画で実装済み。U3コードは存在するが未受入れであり、U4/B1、U5開始、公開を許可しない。実機Safariは未検証。
+主担当が同じ承認済み短時間verifyを今回再実行しexit0、verified=true、currentSourceVerified=trueを観測した。正式U2 checkpointは本記録時点で未完了。acceptancePassed=false、mergeAllowed=false、laterUnitAcceptance=falseを保持する。現在同一sourceの統合前署名付きCI、現在候補のU3正式HTTPS36試行・専用CIは未完了。共有SHA256改善と生記録照合は既存の検証対象であり、本再開で再実装しない。U3コードの存在から受入れを推定せず、U4/B1、U5開始、公開を許可しない。実機Safariは未検証。
 
 ## 実装判断・試験と計画との差分
 
-既存guest私有copy/WeakMap brand、同期SHA256・ELF検証（共有SHA256の承認済みU3改善を含む）、fixture/path/inode検証、唯一のsession予約/token/epoch、取消・cleanupと原子的commitを維持する。追跡表のOKは実装・試験ファイルへの対応であり正式受入れを示さない。品質基準80%、probe600秒、aubeブラウザ840秒、1worker/retry0、probe8項目、native一致、wasm1GBは変更なし。
+ドキュメント根拠と実装読取り：guest私有copy/WeakMap brand、同期SHA256・ELF検証、fixture/path/inode検証、唯一のsession予約/token/epoch、取消・cleanupと原子的commitを維持する。既に承認されたU3の共有SHA256改善を含む現在sourceがv8検証対象。追跡表のOKは実装/試験ファイルへの対応であり、正式受入れ状態ではない。
 
-今回の記録更新に新規テストは追加していない。既存U2単体・consumer・ブラウザ・型試験と全回帰はv5の実観測結果を参照し、再開範囲が記録整合のため再実行していない。計画との差分なし。正式完了確認は主担当が承認済みコマンドで実行する。
+品質基準80%、180秒期限、非download中央値3秒、probe600秒、aubeブラウザ840秒、1worker/retry0、probe8項目、native一致、wasm1GBと容量上限を変更していない。今回の記録整合に新規テストは追加せず、既存suiteを再実行していない。計画との差分なし。正式完了確認は主担当が承認済みverification-command.txtを使用する。
+
+旧v4–v7および旧16JS/26pack署名付きCIは履歴であり、v8へ再ラベルしない。詳細はcurrent-recovery-verification.mdを参照する。
 
 ## 以下は再開前の履歴（16JS/26pack、現在候補のCI証拠ではない）
 

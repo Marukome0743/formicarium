@@ -11,6 +11,10 @@ import {
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseUniqueJSON } from './unique-json.js';
+
+/** C11 metadata cap; cached build-info gets the same bound as fresh input. */
+const BUILD_INFO_LIMIT = 1024 * 1024;
 
 export const BASELINE_COMMIT = '2405c7620169bd0719166af09a8d89cc76fb37fb';
 export const BASELINE_REPOSITORY = 'https://github.com/biomejs/biome';
@@ -290,8 +294,14 @@ export async function readAccepted(
 ): Promise<BaselineReceipt> {
   const elf = new Uint8Array(await readFile(resolve(directory, 'biome')));
   validateBaselineElf(elf);
-  const raw = await readFile(resolve(directory, 'build-info.json'));
-  const info = JSON.parse(raw.toString('utf8')) as BuildInfo;
+  const infoPath = resolve(directory, 'build-info.json');
+  // Refuse from the size first so an oversized cache file is never read whole.
+  if ((await stat(infoPath)).size > BUILD_INFO_LIMIT)
+    throw Error('accepted baseline metadata exceeds 1 MiB');
+  const raw = await readFile(infoPath);
+  if (raw.byteLength > BUILD_INFO_LIMIT)
+    throw Error('accepted baseline metadata exceeds 1 MiB');
+  const info = parseUniqueJSON(raw.toString('utf8')) as BuildInfo;
   const key = baselineKey(inputs);
   if (
     info.schemaVersion !== 1 ||

@@ -6,7 +6,7 @@
 
 検証済み：mainのREDは .artifacts/migration-install/collector-repair-red-20261016.json。build exit0、coverage試験13件中12pass・1fail・skip0。新試験は実bridgeの2048incrementすべてのcounter値と毎setter store列が一致した後、getter Atomic.load増分2049により失敗した（期待0）。時間の閾値を使った推定ではない。
 
-mainのGREEN観測は .artifacts/migration-install/collector-repair-targeted-20261016.json。build/typecheck exit0、coverage17pass・fail/cancel/skip/TODO0、U3 acceptance32pass・fail/cancel/skip/TODO0、実配信8pass・fail/cancel/skip/TODO0、対象Biome check exit0。mainが対象試験だけformatし、再build/対象再試験まで成功した。その後、下記の新候補全18工程と正式36試行も成功した。追加CIは未実施であり、ローカル成功からCI TIMEOUT解消を断定しない。
+mainのGREEN観測は .artifacts/migration-install/collector-repair-targeted-20261016.json。build/typecheck exit0、coverage17pass・fail/cancel/skip/TODO0、U3 acceptance32pass・fail/cancel/skip/TODO0、実配信8pass・fail/cancel/skip/TODO0、対象Biome check exit0。mainが対象試験だけformatし、再build/対象再試験まで成功した。その後、下記の新候補全18工程と正式36試行も成功した。追加CIは後述のとおり失敗し、ローカル成功からCI TIMEOUT解消を断定しない。
 
 ## 単一writerの根拠
 
@@ -65,4 +65,12 @@ mainが新source identity=8897cea442a680b469c474b0a8164175b5499a48f200cc1bd6eb8f
 
 U1のpackage coverage、U2のsession coverage、U3のcombined coverageは同じbridgeSourceを使うため、共有変更としてU3 source-manifestへscripts/package/coverage.ts、scripts/package/coverage.js、tests/package/coverage.test.ts、tests/package/coverage.test.jsを個別claimした。既存106パスを保持して計110パス。過去のU1/U2記録・封印済みproofと、固定eb50/run38766787639向けartifact verifier/bindingは変更しない。
 
-追加の署名付きpushとCI再試行1回は未実施。mainが実コマンドを提示し、別の人間承認を待つ。旧失敗CIから合格完了確認を生成せず、新sourceのCI成功・独立レビュー・承認済みの新しい短い完了確認までU3完了とはしない。
+検証済み：人間承認後、mainが追加署名付きpushとCI再試行1回を実行した。signed head=c30e2a9b90eabaa35a2fd9ee51d313209ce9290e、GitHub verified=true/reason=valid、署名前後のtree=5cf3a2327c348bcb9c738e347fd8f63c84bd1a55は一致する。run38784488074・attempt1・job116592855385は途中観測時点でin_progress（最終結果はfailure、後述）。準備・build・typecheck・入力復元・core・独立consumer工程は成功したが、この途中観測後、CI全体はfailureで終了した。push記録は .artifacts/migration-install/collector-signed-push-38784488074.json。
+
+検証済み：mainが新verifierを実行し11pass・0fail・0skip。実ローカル証拠のpositive componentは16.97秒で成功しacceptancePassed=falseを維持、同じpending bindingのwhole acceptance拒否も確認した。記録は .artifacts/migration-install/collector-verifier-tests-20261016.json。CI成功・独立レビュー・正式完了確認は未完了で、U3完了とはしない。
+
+## 追加CIの最終結果
+
+2026-10-16 CI最終結果（検証済み）：run38784488074・attempt1は39分4秒でfailure。追加push・再試行は行っていない。command14のinstrumented combined Nodeは115件中114pass・1fail・0skip。test25は成功（719975.642834ms、複数install/runを含む試験全体）、test27だけが初回install待機中に180681.584382msでInstall deadline/TIMEOUTとなった（install.js:1252、validateGuest/yield後、試験line149）。180秒の期限は変更していない。incomplete.jsonのobservedCommandsは13。CI browser coverage・最終report・formal36には到達せず、cleanup/uploadは成功した。ローカル18工程・正式36試行の成功証拠は保持するが、CI成功・U3完了は主張しない。
+
+独立取得した失敗CI資料：.artifacts/migration-install/ci-failed-38784488074-1/artifact.zip（143386bytes・22members、SHA256=74b190b75dd24923d094583fe19587cd1e25904fb4f0e885cbc6caa93dbc396d）、同ディレクトリのjob.log、およびmembers/migration-install/completion-fe92ef9c-05bc-4928-929f-4fbabf00e9ec/incomplete.json。API照合済みZIPとしてmainが保存した。新pending bindingとread-only helperは合格証拠へ変更せず、原因調査中である。

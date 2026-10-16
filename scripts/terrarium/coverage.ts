@@ -494,7 +494,7 @@ export async function prepareCoverage({
         : join(packageRoot, path);
     const bytes = await readFile(original);
     const compiled = path.endsWith('.ts')
-      ? stripTypeScriptTypes(bytes.toString(), { mode: 'transform' })
+      ? stripTypeScriptTypes(bytes.toString(), { mode: 'strip' })
       : bytes.toString();
     const instrumenter = createInstrumenter({
       esModules: true,

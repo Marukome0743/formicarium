@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   mkdir,
@@ -11,7 +10,6 @@ import {
 } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 import { consumerInput } from '../../tests/migration-session/consumer-input.js';
 import {
   checkInstallCandidate,
@@ -22,14 +20,9 @@ import { reportInstallCoverage } from '../migration-install/coverage.js';
 import { installSourceInventory } from '../migration-install/stage.js';
 import type { Command } from '../migration-session/completion.js';
 import { FIRST_PARTY_JS, sha256 } from '../package/stage-package.js';
-import { type BaselineInputs, readAccepted } from './baseline.js';
 import { verifyCurrentRawCoverage } from './current-coverage.js';
-import {
-  checkAcceptance,
-  parseUniqueJSON,
-  REQUIRED_SUITES,
-  type VerificationInput,
-} from './verify.js';
+import { assemblePreflightEvidence } from './current-evidence.js';
+import { checkAcceptance, parseUniqueJSON } from './verify.js';
 
 type Seal = { path: string; sha256: string };
 type ObservedCommand = Command &
@@ -69,9 +62,14 @@ export interface CurrentCompletionInput {
   consumer: string;
   guest: Seal;
   actualSite: { path: string; files: Seal[]; sha256: string };
-  historicalVerification: Seal;
-  historicalFiles: Seal[];
-  retained: { verifier: Seal; binding: Seal; reportSha256: string };
+  preflight: {
+    trialsDirectory: string;
+    browserLog: Seal;
+    inventory: Seal;
+    baselineDirectory: string;
+    ciRun: Seal;
+    files: Seal[];
+  };
 }
 const readJSON = async <T>(path: string): Promise<T> =>
   parseUniqueJSON(await readFile(path, 'utf8')) as T;
@@ -142,26 +140,22 @@ export async function currentCompletionSource(root: string): Promise<Seal[]> {
     [...paths].sort().map((path) => seal(resolve(root, path))),
   );
 }
-async function historicalFiles(root: string, path: string): Promise<Seal[]> {
-  const manifest = await readJSON<VerificationInput>(path);
-  const paths = new Set<string>([resolve(path)]);
-  for (const field of [
-    'evidence',
-    'inventory',
-    'baselineInputs',
-    'firstReceipt',
-    'reuseReceipt',
-  ] as const)
-    paths.add(resolve(root, manifest[field]));
-  for (const row of manifest.suites) paths.add(resolve(root, row.record));
-  // Raw trial/CI files remain sealed alongside the C01 aggregate and receipts.
-  for (const path of await tree(
-    root,
-    'docs/results/terrarium-migration-preflight-evidence',
-  ))
-    paths.add(resolve(root, path));
-  for (const path of await tree(root, manifest.baselineDirectory))
-    paths.add(resolve(root, path));
+/** Every raw file this run's preflight evidence is assembled from. */
+async function preflightFiles(
+  root: string,
+  preflight: Omit<CurrentCompletionInput['preflight'], 'files'>,
+): Promise<Seal[]> {
+  const paths = new Set<string>([
+    preflight.browserLog.path,
+    preflight.inventory.path,
+    preflight.ciRun.path,
+  ]);
+  for (const directory of [
+    preflight.trialsDirectory,
+    preflight.baselineDirectory,
+  ])
+    for (const path of await tree(root, relative(root, directory)))
+      paths.add(resolve(root, path));
   return Promise.all([...paths].sort().map(seal));
 }
 export async function assertSeals(rows: readonly Seal[]): Promise<void> {
@@ -205,6 +199,29 @@ export async function acquireCurrentLock(root: string) {
     await rm(path);
   };
 }
+/** Work still open after a current local verification; finished units are not listed. */
+export const CURRENT_PENDING: readonly string[] = Object.freeze([
+  'current same-source signed CI before merge',
+  'U4 B1 integration acceptance (C06)',
+]);
+/** Evidence made with an older toolchain is history, never current proof. */
+export function assertCurrentToolchainEvidence(evidence: {
+  environment?: { node?: unknown };
+}): void {
+  if (evidence.environment?.node !== process.version)
+    throw Error(
+      `preflight evidence must be produced with the current Node ${process.version}`,
+    );
+}
+function preflightRun(input: CurrentCompletionInput) {
+  return {
+    trialsDirectory: input.preflight.trialsDirectory,
+    browserLogPath: input.preflight.browserLog.path,
+    inventoryPath: input.preflight.inventory.path,
+    baselineDirectory: input.preflight.baselineDirectory,
+    ciRunPath: input.preflight.ciRun.path,
+  };
+}
 export function currentCompletionCommands(
   root: string,
   coverage: string,
@@ -221,18 +238,6 @@ export function currentCompletionCommands(
   const report = commands.at(-1)!;
   report.args[report.args.length - 1] = input.candidate.path;
   return [
-    {
-      executable: process.execPath,
-      cwd: root,
-      args: [
-        input.retained.verifier.path,
-        input.retained.binding.path,
-        input.retained.binding.sha256,
-        input.retained.reportSha256,
-        input.retained.verifier.sha256,
-        '--retained-evidence',
-      ],
-    },
     ...commands.slice(0, 2),
     {
       executable: 'mise',
@@ -246,6 +251,7 @@ export function currentCompletionCommands(
         '--test',
         '--test-concurrency=1',
         'tests/migration-preflight/current-completion.test.js',
+        'tests/migration-preflight/current-evidence.test.js',
       ],
     },
     ...commands.slice(2),
@@ -316,49 +322,26 @@ export function assertCurrentCoverage(
       'fresh whole-distribution coverage missing/zero/skipped/below80',
     );
 }
-async function assertHistory(input: CurrentCompletionInput) {
-  await assertSeals(input.historicalFiles);
-  const manifest = await readJSON<VerificationInput>(
-    input.historicalVerification.path,
-  );
+async function assertPreflight(input: CurrentCompletionInput) {
+  await assertSeals(input.preflight.files);
   if (
-    manifest.schemaVersion !== 1 ||
-    manifest.suites.length !== REQUIRED_SUITES.length
+    JSON.stringify(await preflightFiles(input.root, input.preflight)) !==
+    JSON.stringify(input.preflight.files)
   )
-    throw Error('historical U1 suite inventory missing');
-  for (const name of REQUIRED_SUITES) {
-    const rows = manifest.suites.filter((row) => row.name === name);
-    const row = rows[0];
-    if (
-      rows.length !== 1 ||
-      !row ||
-      row.recordKind !== 'observed-command-summary' ||
-      row.exitCode !== 0 ||
-      row.passed <= 0 ||
-      row.failed !== 0 ||
-      row.skipped !== 0 ||
-      !/^[a-f0-9]{40}$/.test(row.sourceCommit) ||
-      sha256(await readFile(resolve(input.root, row.record))) !==
-        row.recordSha256
-    )
-      throw Error(`historical U1 raw suite evidence missing/changed: ${name}`);
-  }
-  if (
-    JSON.stringify(
-      await historicalFiles(input.root, input.historicalVerification.path),
-    ) !== JSON.stringify(input.historicalFiles)
-  )
-    throw Error('historical input inventory drift');
-  return manifest;
+    throw Error('preflight input inventory drift');
+  const log = await readFile(input.preflight.browserLog.path, 'utf8');
+  assertPassingTestOutput(log);
+  const ansiColors = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+  if (!/\b36 passed\b/.test(log.replace(ansiColors, '')))
+    throw Error('preflight browser log must show all 36 trials passed');
 }
 async function checkInput(input: CurrentCompletionInput) {
   await assertActualSite(input.root, input.actualSite);
   await assertSeals([
     input.candidate,
     input.guest,
-    input.historicalVerification,
-    input.retained.verifier,
-    input.retained.binding,
+    input.preflight.inventory,
+    input.preflight.ciRun,
   ]);
   const candidate = await checkInstallCandidate(
     input.candidate.path,
@@ -377,7 +360,8 @@ async function checkInput(input: CurrentCompletionInput) {
     consumer.candidate.tarball.sha256 !== input.packSha256
   )
     throw Error('independent installed consumer differs from prepared input');
-  return { candidate, consumer, historical: await assertHistory(input) };
+  await assertPreflight(input);
+  return { candidate, consumer };
 }
 async function assertIndependentPackage(
   input: Pick<CurrentCompletionInput, 'root' | 'consumer'>,
@@ -411,10 +395,11 @@ export async function prepareCurrentInput(options: {
   candidate: string;
   consumer: string;
   guest: string;
-  historical: string;
-  binding: string;
-  verifier: string;
-  reportSha256: string;
+  trials: string;
+  browserLog: string;
+  inventory: string;
+  baseline: string;
+  ciRun: string;
 }): Promise<CurrentCompletionInput> {
   for (const [name, value] of Object.entries(options))
     if (typeof value !== 'string' || !value.trim())
@@ -433,8 +418,6 @@ export async function prepareCurrentInput(options: {
     candidate,
   );
   const currentSource = await currentCompletionSource(root);
-  if (!/^[a-f0-9]{64}$/.test(options.reportSha256))
-    throw Error('retained report SHA required');
   return {
     schemaVersion: 1,
     kind: 'current-completed-units-input',
@@ -447,14 +430,31 @@ export async function prepareCurrentInput(options: {
     consumer: await realpath(options.consumer),
     guest: await seal(options.guest),
     actualSite,
-    historicalVerification: await seal(options.historical),
-    historicalFiles: await historicalFiles(root, options.historical),
-    retained: {
-      verifier: await seal(options.verifier),
-      binding: await seal(options.binding),
-      reportSha256: options.reportSha256,
-    },
+    preflight: await preparePreflight(root, options),
   };
+}
+async function preparePreflight(
+  root: string,
+  options: {
+    trials: string;
+    browserLog: string;
+    inventory: string;
+    baseline: string;
+    ciRun: string;
+  },
+): Promise<CurrentCompletionInput['preflight']> {
+  const attempt = await realpath(options.trials);
+  const preflight = {
+    trialsDirectory: resolve(attempt, 'trials'),
+    browserLog: await seal(options.browserLog),
+    inventory: await seal(options.inventory),
+    baselineDirectory: await realpath(options.baseline),
+    ciRun: await seal(options.ciRun),
+  };
+  for (const path of [preflight.trialsDirectory, preflight.baselineDirectory])
+    if (!path.startsWith(`${root}/`))
+      throw Error('preflight evidence must be project-local');
+  return { ...preflight, files: await preflightFiles(root, preflight) };
 }
 export async function writeCurrentPreparedInput(
   out: string,
@@ -547,23 +547,18 @@ export async function runCurrentCompletion(
     >(resolve(coveragePath, 'coverage-report.json'));
     assertCurrentCoverage(coverage, input);
     await verifyCurrentRawCoverage(coveragePath, initial.candidate);
-    const historical = initial.historical;
-    const load = <T>(field: keyof VerificationInput) =>
-      readJSON<T>(resolve(input.root, historical[field] as string));
-    const baselineInputs = await load<BaselineInputs>('baselineInputs');
-    checkAcceptance({
-      evidence: await load('evidence'),
-      inventory: await load('inventory'),
-      baselineInputs,
-      first: await load('firstReceipt'),
-      reuse: await load('reuseReceipt'),
-      accepted: await readAccepted(
-        resolve(input.root, historical.baselineDirectory),
-        baselineInputs,
-      ),
-      coverage,
-      candidate: initial.candidate,
+    const assembled = await assemblePreflightEvidence(preflightRun(input), {
+      evidenceId: `u1-current-${output.slice(output.lastIndexOf('-') + 1)}`,
+      recordedAt: new Date().toISOString(),
     });
+    assertCurrentToolchainEvidence(assembled.evidence);
+    checkAcceptance({ ...assembled, coverage, candidate: initial.candidate });
+    const evidencePath = resolve(output, 'acceptance-evidence.json');
+    await writeFile(
+      evidencePath,
+      `${JSON.stringify(assembled.evidence, null, 2)}\n`,
+      { flag: 'wx' },
+    );
     await checkInput(input);
     if (sha256(await readFile(inputPath)) !== expectedSha256)
       throw Error('prepared input changed');
@@ -597,24 +592,21 @@ export async function runCurrentCompletion(
           currentSource: input.currentSource,
           candidateSha256: input.packSha256,
           preparedInput: { path: resolve(inputPath), sha256: expectedSha256 },
-          historicalEvidenceVerified: true,
-          historicalCI:
-            'retained U2 signed same historical source/pack; not current-source CI',
-          historicalPreflight: {
-            source: historical.evidence,
-            suites: historical.suites,
-            executionScope: 'historical C01/36 trials/baseline first/reuse',
+          preflightEvidenceVerified: true,
+          preflightEvidenceNode: process.version,
+          preflightEvidence: {
+            evidence: await seal(evidencePath),
+            trialsDirectory: input.preflight.trialsDirectory,
+            browserLog: input.preflight.browserLog,
+            ciRunUrl: assembled.evidence.baseline.ciRunUrl,
+            executionScope:
+              'current-toolchain C01/36 trials/baseline first/reuse',
           },
           coverageReport: await seal(
             resolve(coveragePath, 'coverage-report.json'),
           ),
           commands: observed,
-          pending: [
-            'current same-source signed CI before merge',
-            'U3 formal 36-trial performance acceptance <=3000ms',
-            'U3 dedicated signed CI',
-            'U3 implementation-plan approval',
-          ],
+          pending: [...CURRENT_PENDING],
           realSafari: '未検証',
         },
         null,
@@ -710,7 +702,7 @@ export async function verifyCurrentCompletion(
     U2_ACTUAL_SITE: input.actualSite.path,
   });
   try {
-    const { candidate, historical } = await checkInput(input);
+    const { candidate } = await checkInput(input);
     await assertSeals(report.evidenceFiles);
     const actualFiles = (
       await tree(input.root, relative(input.root, report.output))
@@ -761,49 +753,22 @@ export async function verifyCurrentCompletion(
       )
         assertPassingTestOutput(await readFile(row.rawLogPath, 'utf8'));
     }
-    const retained = commands[0]!;
-    const result = await promisify(execFile)(
-      retained.executable,
-      retained.args,
-      {
-        cwd: input.root,
-        env: process.env,
-        timeout: 60000,
-        maxBuffer: 1024 * 1024,
-      },
-    );
-    const old = parseUniqueJSON(result.stdout) as {
-      retainedEvidenceVerified: boolean;
-      currentSourceVerified: boolean;
-      verified: boolean;
-    };
-    if (
-      !old.retainedEvidenceVerified ||
-      old.currentSourceVerified !== false ||
-      old.verified !== false
-    )
-      throw Error('historical proof scope differs');
     await verifyCurrentRawCoverage(report.coveragePath, candidate);
     const coverage = await readJSON<
       Parameters<typeof checkAcceptance>[0]['coverage']
     >(resolve(report.coveragePath, 'coverage-report.json'));
     assertCurrentCoverage(coverage, input);
-    const load = <T>(field: keyof VerificationInput) =>
-      readJSON<T>(resolve(input.root, historical[field] as string));
-    const baselineInputs = await load<BaselineInputs>('baselineInputs');
-    checkAcceptance({
-      evidence: await load('evidence'),
-      inventory: await load('inventory'),
-      baselineInputs,
-      first: await load('firstReceipt'),
-      reuse: await load('reuseReceipt'),
-      accepted: await readAccepted(
-        resolve(input.root, historical.baselineDirectory),
-        baselineInputs,
-      ),
-      coverage,
-      candidate,
+    const recorded = await readJSON<
+      Parameters<typeof checkAcceptance>[0]['evidence']
+    >(resolve(report.output, 'acceptance-evidence.json'));
+    const assembled = await assemblePreflightEvidence(preflightRun(input), {
+      evidenceId: recorded.evidenceId,
+      recordedAt: recorded.recordedAt,
     });
+    if (JSON.stringify(assembled.evidence) !== JSON.stringify(recorded))
+      throw Error('recorded preflight evidence differs from its sealed inputs');
+    assertCurrentToolchainEvidence(assembled.evidence);
+    checkAcceptance({ ...assembled, coverage, candidate });
     await checkInput(input);
     await assertSeals([
       { path: inputPath, sha256: inputSha256 },
@@ -838,17 +803,19 @@ if (
         await verifyCurrentCompletion(args[0]!, args[1]!, args[2]!, args[3]!),
       ),
     );
-  else if (mode === 'prepare' && args.length === 8) {
+  else if (mode === 'prepare' && args.length === 9) {
     const [
       out,
       candidate,
       consumer,
       guest,
-      historical,
-      binding,
-      verifier,
-      reportSha256,
+      trials,
+      browserLog,
+      inventory,
+      baseline,
+      ciRun,
     ] = args as [
+      string,
       string,
       string,
       string,
@@ -869,14 +836,15 @@ if (
       candidate,
       consumer,
       guest,
-      historical,
-      binding,
-      verifier,
-      reportSha256,
+      trials,
+      browserLog,
+      inventory,
+      baseline,
+      ciRun,
     });
     console.log(JSON.stringify(await writeCurrentPreparedInput(out, input)));
   } else
     throw Error(
-      'usage: current-completion.js run <prepared-input> <SHA256> | verify <input> <input-SHA256> <report> <report-SHA256> | prepare <new-input> <candidate> <consumer> <guest> <historical-verification> <retained-binding> <retained-verifier> <retained-report-SHA256>',
+      'usage: current-completion.js run <prepared-input> <SHA256> | verify <input> <input-SHA256> <report> <report-SHA256> | prepare <new-input> <candidate> <consumer> <guest> <trial-attempt-dir> <trial-log> <mirror-input> <baseline-artifact-dir> <ci-run-json>',
     );
 }

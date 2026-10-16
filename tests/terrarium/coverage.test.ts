@@ -414,21 +414,23 @@ test('immutable U1 import preserves original realm names and rejects wrong pack/
     /denominator/,
     'historical U2 sixteen-file distribution is not historical fourteen-file proof',
   );
-  const currentTwentyOne = structuredClone(historicalU2Sixteen);
+  const currentTwentyThree = structuredClone(historicalU2Sixteen);
   for (const name of [
     'install-catalog',
     'install-transfer',
     'install-archive',
     'install-lifecycle',
     'install',
+    'command-parse',
+    'command',
   ]) {
     const path = `runtime/${name}.js`;
-    currentTwentyOne.files.push({ ...report.files[0], path });
-    currentTwentyOne.digests.push({ ...report.digests[0], path });
+    currentTwentyThree.files.push({ ...report.files[0], path });
+    currentTwentyThree.digests.push({ ...report.digests[0], path });
   }
-  assert.equal(currentTwentyOne.files.length, 21);
+  assert.equal(currentTwentyThree.files.length, 23);
   assert.throws(
-    () => componentImport(f.inventory, currentTwentyOne, 'e'.repeat(64)),
+    () => componentImport(f.inventory, currentTwentyThree, 'e'.repeat(64)),
     /denominator/,
     'current install distribution cannot inherit historical fourteen-file proof',
   );

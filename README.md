@@ -80,6 +80,12 @@ Node >=24、ブラウザの COOP/COEP・同一 origin Worker/assets・CSP の要
 
 公開型、catalogの必須情報、取消・進捗・エラーと例は [install API](docs/install-api.md) を参照して下さい。U3はNodeとChromium/Firefox/WebKitのローカル試験を実施した暫定実装で、正式受入れ・同候補のcoverage/署名付きCIは未完了、実機Safariは未検証です。npm公開やterrariumの退役完了を示すものではありません。
 
+### 端末 command API（U4 暫定候補）
+
+`createCommandSession(session, { catalog })` は1行の文字列を解釈し、`ls [path]`・`cat path`・`cd path`・`rm -rf path` をsessionのFS操作へ、`install <selection>` を同じcatalogのinstallへ、それ以外を登録済みguestの実行へ振り分けます。shell構文（pipe・リダイレクト・変数展開・glob等）は展開せず `INVALID_INPUT` にします。各commandはsessionの予約を1回だけ使い、直接API・別のcommand sessionとの競合は `BUSY` です。結果のstdout/stderrは原本bytesで、表示への変換と表示上限はUI側の責任です。
+
+構文、予約名、取消とtimeout、UIへの受渡し条件は [command API](docs/command-api.md) を参照して下さい。U4は実装済みの暫定候補で、試験・coverage・B1統合受入・署名付きCIはこの追加時点で未検証、実機Safariも未検証です。
+
 [jart/blink](https://github.com/jart/blink)（x86-64 Linux のユーザーモードエミュレータ）の fork
 [aletheia-works/blink](https://github.com/aletheia-works/blink)（`formicarium-wasm` ブランチ）を
 Emscripten で wasm にビルドし（インタプリタのみ、JIT なし）、static-musl の x86-64 バイナリを

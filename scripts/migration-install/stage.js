@@ -36,6 +36,22 @@ export async function installSourceInventory(root = workspace) {
         });
     return [...inventory.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 }
+/** Candidate units the U3 acceptance entries accept on the current tree. */
+export const INSTALL_REGRESSION_UNITS = Object.freeze([
+    'u3-install',
+    'u4-command',
+]);
+/**
+ * The source inventory a candidate must match. A U3 candidate always uses the
+ * U3 inventory; a U4 candidate needs the inventory its caller supplies.
+ */
+export async function installCandidateInventory(unit, root = workspace, options = {}) {
+    if (unit === 'u3-install')
+        return await installSourceInventory(root);
+    if (unit === 'u4-command' && options.commandSourceInventory)
+        return await options.commandSourceInventory(root);
+    throw Error(`U3 acceptance has no source inventory for candidate unit ${String(unit)}`);
+}
 /** Local U3 candidate preparation only. No source version change or publication. */
 export async function stageInstall({ root = workspace, sourceCommit = process.env.FORMICARIUM_SESSION_SOURCE, out = `.artifacts/migration-install/candidate-${randomUUID()}/package`, } = {}) {
     if (!sourceCommit || !/^[0-9a-f]{40}$/.test(sourceCommit))
