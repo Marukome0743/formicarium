@@ -42,8 +42,8 @@ import {
   commandSourceInventory,
 } from '../../scripts/migration-command/stage.js';
 import { INSTALL_REALMS } from '../../scripts/migration-install/coverage.js';
-import { readPlaywrightNodeRealms } from '../../scripts/package/coverage.js';
 import { validateCIInputManifest } from '../../scripts/migration-session/ci-inputs.js';
+import { readPlaywrightNodeRealms } from '../../scripts/package/coverage.js';
 import {
   FIRST_PARTY_JS,
   sha256,
@@ -525,8 +525,29 @@ test('U4 CI maps only its scoped unit task and refuses unknown tasks, escapes an
       args: ['scripts/migration-command/coverage.js', 'prepare', '/etc/x'],
       cwd: root,
     },
+    {
+      executable: process.execPath,
+      args: ['scripts/migration-command/measure.js', '/etc/x'],
+      cwd: root,
+    },
   ])
     assert.throws(() => mapCommandCICommand(command, root), /refused|escapes/);
+});
+test('every U4 completion step, including the U4 measure entry, is accepted by the U4 CI mapping', () => {
+  const root = process.cwd();
+  const planned = commandCompletionCommands(
+    root,
+    resolve(root, '.artifacts/migration-command/x/coverage'),
+    resolve(root, '.artifacts/migration-command/x/measure'),
+  );
+  for (const item of planned)
+    assert.doesNotThrow(
+      () => mapCommandCICommand(item.command, root),
+      item.label,
+    );
+  const measure = planned.find((item) => item.label === 'measure')!.command;
+  assert.deepEqual(mapCommandCICommand(measure, root).args, measure.args);
+  assert.equal(measure.args[0], 'scripts/migration-command/measure.js');
 });
 test('the U4 workflow keeps U3 safety: read-only, own branch, serial, 360 min, 7-day raw evidence', async () => {
   const [u4, u3] = await Promise.all(

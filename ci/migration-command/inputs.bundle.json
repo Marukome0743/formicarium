@@ -517,11 +517,11 @@
     },
     {
       "path": "scripts/migration-command/ci.js",
-      "sha256": "66eeb8860685cec73bc6780589aeec03166f501b6c6bcde1e6c6f138f05863d1"
+      "sha256": "90c41df463e6dcc9121e077b5fe947efe7ffd2c3c84af95218faf4712c901a66"
     },
     {
       "path": "scripts/migration-command/ci.ts",
-      "sha256": "6e2fa547532e5232f2a2f9698bf2c01cb760a84adb41a6ba0f50989b0b4d14f0"
+      "sha256": "d39fc70f43d4d8e81678e484c70bb3bf9e2f0d3286234bbe6e3332be52e25110"
     },
     {
       "path": "scripts/migration-command/completion.js",
@@ -857,11 +857,11 @@
     },
     {
       "path": "tests/migration-command/acceptance.test.js",
-      "sha256": "abd4642fbf5fff5afff83ee18ec8e31c7ce1f98fb098d33bb0a7c4f84e743122"
+      "sha256": "7376feae18e577a34bcc5c77446a278b4c672f61230465b9906356cc75bd73cf"
     },
     {
       "path": "tests/migration-command/acceptance.test.ts",
-      "sha256": "2222147b12967465eb83e07c7bc4dfa8752a2488630553edf3d68641560354f2"
+      "sha256": "6604ba031b1bc7ab33429cfc30cbe5f24bebf8dedc7dc8f4740387774d127650"
     },
     {
       "path": "tests/migration-command/browser-modules.d.ts",

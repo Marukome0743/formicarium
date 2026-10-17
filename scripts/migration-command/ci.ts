@@ -65,7 +65,10 @@ export function mapCommandCICommand(command: Command, root: string): Command {
   }
   if (
     command.executable === process.execPath &&
-    command.args[0] === 'scripts/migration-command/coverage.js'
+    [
+      'scripts/migration-command/coverage.js',
+      'scripts/migration-command/measure.js',
+    ].includes(command.args[0] ?? '')
   ) {
     if (command.args.some((arg) => isAbsolute(arg) && !inside(root, arg)))
       throw Error('U4 CI direct input path escapes checkout');
