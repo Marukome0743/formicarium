@@ -90,6 +90,17 @@ before(async () => {
     if (attempt > 100) throw new Error('the page server did not start');
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  // safaridriver may still be starting when the test does.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const status = (await (await fetch(`${driver}/status`)).json()) as {
+        value?: { ready?: boolean };
+      };
+      if (status.value?.ready) break;
+    } catch {}
+    if (attempt > 100) throw new Error(`safaridriver is not ready: ${driver}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   const created = (await webdriver('POST', '/session', {
     capabilities: { alwaysMatch: { browserName: 'safari' } },
   })) as { sessionId: string; capabilities: Record<string, unknown> };

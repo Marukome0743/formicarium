@@ -335,6 +335,8 @@ jobs:
       - name: 'Run the probe page in real Safari'
         run: |-
           safaridriver --port 4444 &
+          driver=$!
+          trap 'kill "$driver"' EXIT
           node --test --test-concurrency=1 tests/browser/safari-probe.test.js
   product-tests:
     if: "always() && needs.changes.outputs.product == 'true'"
