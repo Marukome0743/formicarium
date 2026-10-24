@@ -1,6 +1,6 @@
 // Playwright の設定。scripts/serve.js（COOP/COEP 付きの開発用サーバー）を起動し、
 // Chromium・Firefox・WebKit の 3 つでブラウザのテストを実行する。
-// WebKit は Windows 上での Safari の代わり（実機の Safari は macOS で別途確認する）。
+// WebKit は Safari の代わり（実機の Safari では tests/browser/safari-probe.test.ts が probe を確かめる）。
 import { defineConfig, devices } from '@playwright/test';
 
 const port = Number(process.env.FORMICARIUM_PORT ?? 8787);

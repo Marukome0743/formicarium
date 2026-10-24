@@ -294,20 +294,64 @@ jobs:
             browser-logs/
           retention-days: 7
           if-no-files-found: 'warn'
+  # Real Safari, not Playwright's WebKit build: safaridriver drives the Safari
+  # that ships with macOS through the probe page, one session and no retries.
+  product-safari:
+    name: 'Product (safari)'
+    runs-on: 'macos-latest'
+    needs:
+      - 'product-build'
+    timeout-minutes: 90
+    steps:
+      - uses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' # v7.0.1
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+      - uses: 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1' # v7.1.0
+        with:
+          node-version: 'latest'
+          check-latest: true
+          package-manager-cache: false
+      - uses: 'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' # v2.2.0
+        with:
+          bun-version: 'latest'
+      - run: 'bun install --frozen-lockfile --ignore-scripts'
+      - run: 'bun add --dev --no-save --ignore-scripts @playwright/test@latest @biomejs/biome@latest typescript@latest'
+      - run: 'bun run --bun build'
+      - name: 'Download products built by this source and run'
+        uses: 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' # v8.0.2
+        with:
+          pattern: 'product-build-*-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}'
+          path: 'dist'
+          merge-multiple: true
+      - name: 'Restore guest executable permissions'
+        run: 'chmod +x dist/guests/probe dist/guests/hello dist/guests/exit3'
+      - name: 'Record the macOS and Safari versions'
+        run: |-
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString
+      - name: 'Allow safaridriver to drive Safari'
+        run: 'sudo safaridriver --enable'
+      - name: 'Run the probe page in real Safari'
+        run: |-
+          safaridriver --port 4444 &
+          node --test --test-concurrency=1 tests/browser/safari-probe.test.js
   product-tests:
     if: "always() && needs.changes.outputs.product == 'true'"
     needs:
       - 'changes'
       - 'product-build'
       - 'product-regression'
+      - 'product-safari'
     runs-on: 'ubuntu-latest'
     timeout-minutes: 5
     steps:
-      - name: 'Require every product build, native baseline and matrix suite'
+      - name: 'Require every product build, native baseline, matrix suite and Safari'
         env:
           BUILD_RESULT: '${{ needs.product-build.result }}'
           REGRESSION_RESULT: '${{ needs.product-regression.result }}'
-        run: 'test "$BUILD_RESULT" = success && test "$REGRESSION_RESULT" = success'
+          SAFARI_RESULT: '${{ needs.product-safari.result }}'
+        run: 'test "$BUILD_RESULT" = success && test "$REGRESSION_RESULT" = success && test "$SAFARI_RESULT" = success'
       - name: 'Download products built by this source and run'
         uses: 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' # v8.0.2
         with:
