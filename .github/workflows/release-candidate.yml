@@ -49,8 +49,8 @@ jobs:
       - run: bun scripts/ci/tasks.ts build
       - name: Download reviewed external guest and consumer fixtures
         env:
-          FORMICARIUM_MODERNIZATION_INPUT_URL: https://raw.githubusercontent.com/aletheia-works/formicarium/e206962ed3d7a7738b46d03c1106db392141381d/verification-inputs/candidate-0.2.0.tar.gz
-          FORMICARIUM_MODERNIZATION_INPUT_SHA256: 9affaebeb6c2b6ed4fa212adbb7167124d4fd2793233e226ba3230efd7d2490f
+          FORMICARIUM_MODERNIZATION_INPUT_URL: https://raw.githubusercontent.com/aletheia-works/formicarium/3a59dd6acd68eb5e0ecf04a91591f3167f7fb405/verification-inputs/candidate-aube-2.8.5-pitchfork-2.32.4.tar.gz
+          FORMICARIUM_MODERNIZATION_INPUT_SHA256: e291ada681c36a9c4e6af32b8982272b1911e7cb248435746f2720c1d26a3f38
         run: |
           python3 scripts/ci/install-modernization-inputs.py
           mv .ci-inputs .ci-fixtures

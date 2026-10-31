@@ -40,7 +40,7 @@ async function fixture() {
         tarball: `${prefix}package.tgz`,
         packageManifest: `${prefix}package.json`,
         packageRoot: `${prefix}package`,
-        guests: { aube: 'v2.7.0', pitchfork: 'v2.30.1' },
+        guests: { aube: 'v2.8.5', pitchfork: 'v2.32.4' },
       },
       sourcePaths: ['source.ts'],
       inputs: paths.map((path) => ({ source: sourceInput, path })),

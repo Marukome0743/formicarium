@@ -90,7 +90,7 @@ export function validateManifestContents(
     !/^[a-f0-9]{40}$/.test(input.sourceCommit)
   )
     throw Error('candidate source commit differs');
-  if (input.guests.aube !== 'v2.7.0' || input.guests.pitchfork !== 'v2.30.1')
+  if (input.guests.aube !== 'v2.8.5' || input.guests.pitchfork !== 'v2.32.4')
     throw Error('guest version differs');
   for (const key of ['tarball', 'packageManifest', 'packageRoot'] as const)
     safePath(input[key]);

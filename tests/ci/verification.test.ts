@@ -74,7 +74,7 @@ const manifest = (): InputManifest => ({
   tarball: 'candidate.tgz',
   packageManifest: 'candidate.json',
   packageRoot: 'consumer/node_modules/package',
-  guests: { aube: 'v2.7.0', pitchfork: 'v2.30.1' },
+  guests: { aube: 'v2.8.5', pitchfork: 'v2.32.4' },
 });
 
 test('reviewed same-source manifest requires complete guest fixture supply', () => {

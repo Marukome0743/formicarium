@@ -191,9 +191,9 @@ describe('pitchfork ゲストのビルド', () => {
           line.slice(line.indexOf('=') + 1),
         ]),
     );
-    assert.equal(fields.ref, 'v2.30.1');
-    // Official v2.30.1 tag commit observed independently of local build-info.
-    assert.equal(fields.commit, '1054549e85470b08d9507e2c82c850959a4b3914');
+    assert.equal(fields.ref, 'v2.32.4');
+    // Official v2.32.4 tag commit observed independently of local build-info.
+    assert.equal(fields.commit, 'c00b1762c9fb7a5810671343014ac9b6d7889cc1');
     assert.equal(
       fields.commit,
       readFileSync(
